@@ -1,0 +1,88 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        #document-content {
+            background-color: #fff;
+            color: #000;
+            padding: 20px;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+            max-width: 21cm;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .document-actions {
+            margin-top: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #document-content, #document-content * {
+                visibility: visible;
+            }
+            #document-content {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                border: none;
+                padding: 0;
+                margin: 0;
+            }
+            .document-actions, #header, .breadcrumbs, #django-admin-titlebar, #user-tools, #nav-sidebar {
+                display: none !important;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block title %}{{ title|default:"Просмотр документа" }}{% endblock %}
+
+{% block breadcrumbs %}
+    <div class="breadcrumbs">
+        <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
+        <a href="{% url 'admin:app_list' app_label=app_label|default:'utils' %}">{{ opts.app_config.verbose_name|capfirst|default:"Сервис" }}</a> &rsaquo;
+        {{ title|default:"Просмотр документа" }}
+    </div>
+{% endblock %}
+
+{% block content_title %}
+    <h1>{{ title|default:"Просмотр документа" }}</h1>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <div class="document-actions">
+        <button onclick="window.print();" class="button">{% translate "Печать" %}</button>
+        {# ----- ИСПРАВЛЕНИЕ ССЫЛКИ "НАЗАД" ----- #}
+        {% if request.META.HTTP_REFERER %}
+            <a href="{{ request.META.HTTP_REFERER }}" class="button">{% translate "Назад" %}</a>
+        {% else %}
+            {# Если HTTP_REFERER нет, используем JavaScript для возврата #}
+            <a href="javascript:history.back()" class="button">{% translate "Назад" %}</a>
+        {% endif %}
+        {# ----- КОНЕЦ ИСПРАВЛЕНИЯ ----- #}
+    </div>
+
+    <div id="document-content">
+        {{ document_content|safe }}
+    </div>
+
+    <div class="document-actions">
+        <button onclick="window.print();" class="button">{% translate "Печать" %}</button>
+        {# ----- И ИСПРАВЛЕНИЕ ЗДЕСЬ ----- #}
+        {% if request.META.HTTP_REFERER %}
+            <a href="{{ request.META.HTTP_REFERER }}" class="button">{% translate "Назад" %}</a>
+        {% else %}
+            <a href="javascript:history.back()" class="button">{% translate "Назад" %}</a>
+        {% endif %}
+        {# ----- КОНЕЦ ИСПРАВЛЕНИЯ ----- #}
+    </div>
+</div>
+{% endblock %}

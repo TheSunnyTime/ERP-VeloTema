@@ -1,0 +1,172 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static tz l10n admin_list %} {# <--- ДОБАВЛЕНО 'admin_list' #}
+
+{{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .report-section { 
+      margin-bottom: 30px; 
+    }
+    .report-section h2 { 
+      margin-bottom: 10px; 
+      color: var(--body-fg); /* Цвет текста для подзаголовков секций */
+    }
+    .report-table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin-bottom: 20px; 
+    }
+    .report-table th, .report-table td { 
+      border: 1px solid var(--border-color, #ccc); /* Цвет границ */
+      padding: 8px 12px; 
+      text-align: left; 
+      color: var(--body-fg); /* Основной цвет текста в ячейках */
+    }
+
+    /* Стили для ЗАГОЛОВКОВ ТАБЛИЦЫ (th) */
+    .report-table th { 
+      /* Используем стандартные переменные Django для фона и текста заголовков таблиц */
+      background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); 
+      color: var(--table-header-fg, var(--header-fg, #333333)); 
+      font-weight: bold;
+    }
+
+    .report-table td.amount, .report-table th.amount { 
+      text-align: right; 
+    }
+    .report-table td.amount {
+        font-weight: bold;
+    }
+
+    /* Стили для всплывающей подсказки (tooltip) */
+    .tooltip {
+      position: relative;
+      display: inline-block;
+      cursor: help;
+      color: var(--link-fg); 
+    }
+    .tooltip .tooltiptext {
+      visibility: hidden;
+      width: 220px;
+      background-color: var(--body-quiet-color, #555);
+      color: var(--body-bg, #fff); 
+      text-align: center;
+      border-radius: 6px;
+      padding: 5px 0;
+      position: absolute;
+      z-index: 1;
+      bottom: 125%; 
+      left: 50%;
+      margin-left: -110px; 
+      opacity: 0;
+      transition: opacity 0.3s;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    .tooltip .tooltiptext::after {
+      content: "";
+      position: absolute;
+      top: 100%; 
+      left: 50%;
+      margin-left: -5px;
+      border-width: 5px;
+      border-style: solid;
+      border-color: var(--body-quiet-color, #555) transparent transparent transparent;
+    }
+    .tooltip:hover .tooltiptext {
+      visibility: visible;
+      opacity: 1;
+    }
+  </style>
+{% endblock %}
+
+{% block coltype %}colM{% endblock %}
+{% block bodyclass %}{{ block.super }} app-cash_register model-cashoverviewreport{% endblock %}
+
+{% block content_title %}<h1>{{ title }}</h1>{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
+    {# Используем app_label из контекста, если доступно, или жестко задаем #}
+    <a href="{% url 'admin:app_list' app_label=opts.app_label|default:'cash_register' %}">{% firstof opts.app_config.verbose_name 'Касса' %}</a> &rsaquo;
+    {{ title }}
+  </div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    {% if user_can_view_this_specific_report %} {# Убедитесь, что эта переменная передается из view #}
+        <div class="report-section">
+            <h2>Балансы активных касс</h2>
+            {% if active_cash_registers %}
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>Название кассы</th>
+                            <th class="amount">Текущий баланс</th>
+                            <th>Активна</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cr in active_cash_registers %}
+                        <tr>
+                            <td>{{ cr.name }}</td>
+                            <td class="amount">{{ cr.current_balance|floatformat:2 }} руб.</td>
+                            <td>
+                                {% if cr.is_active %}
+                                 <img src="{% static 'admin/img/icon-yes.svg' %}" alt="Да">
+                                  {% else %}
+                                  <img src="{% static 'admin/img/icon-no.svg' %}" alt="Нет">
+                                  {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>Нет активных касс.</p>
+            {% endif %}
+        </div>
+
+        <div class="report-section">
+            <h2>Последние приходные операции</h2>
+            {% if recent_income_transactions %}
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>Дата и время</th>
+                            <th>Касса</th>
+                            <th>Метод</th>
+                            <th class="amount">Сумма</th>
+                            <th>Заказ</th>
+                            <th>Сотрудник</th>
+                            <th>Описание</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tx in recent_income_transactions %}
+                        <tr>
+                            <td>{{ tx.timestamp|localtime|date:"d E Y г. H:i:s" }}</td> {# Добавил localtime и формат #}
+                            <td>{{ tx.cash_register.name }}</td>
+                            <td>{{ tx.get_payment_method_display }}</td>
+                            <td class="amount">{{ tx.amount|floatformat:2 }} руб.</td>
+                            <td>
+                                {% if tx.order %}
+                                    <a href="{% url 'admin:orders_order_change' tx.order.pk %}">Заказ №{{ tx.order.pk }}</a>
+                                {% else %}-{% endif %}
+                            </td>
+                            <td>{{ tx.employee.get_username|default:"-" }}</td>
+                            <td>{{ tx.description|default:"-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>Нет недавних приходных операций.</p>
+            {% endif %}
+        </div>
+    {% else %}
+        <p>У вас нет прав для просмотра этого отчета.</p>
+    {% endif %}
+</div>
+{% endblock %}

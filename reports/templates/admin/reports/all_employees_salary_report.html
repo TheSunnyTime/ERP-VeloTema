@@ -1,0 +1,122 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <style>
+        .report-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .report-table th, .report-table td { border: 1px solid var(--border-color, #ccc); padding: 6px 8px; text-align: left; font-size: 0.9em;}
+        .report-table th { background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); color: var(--table-header-fg, var(--header-fg, #333333)); font-weight: bold; }
+        .report-table td.amount, .report-table th.amount { text-align: right; }
+        .report-table tfoot td { font-weight: bold; background-color: var(--body-quiet-color, #f5f5f5); }
+         @media (prefers-color-scheme: dark) {
+            .report-table tfoot td { background-color: var(--dark-body-quiet-color, #333); }
+        }
+
+        .filter-form { margin-bottom: 20px; padding: 10px; background-color: var(--body-quiet-color, #f5f5f5); border-radius: 4px; }
+        .filter-form label { margin-right: 5px; margin-left:10px;}
+        .filter-form input[type="number"], .filter-form select { width: auto; min-width:80px; margin-right: 10px; padding: 5px; }
+        .filter-form input[type="submit"] { padding: 5px 10px;}
+         @media (prefers-color-scheme: dark) {
+            .filter-form { background-color: var(--dark-body-quiet-color, #333); }
+        }
+        .period-navigation { margin-bottom: 20px; text-align: center; }
+        .period-navigation a, .period-navigation span { margin: 0 10px; font-size: 1.1em; }
+        .period-navigation .current-period { font-weight: bold; }
+    </style>
+{% endblock %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block breadcrumbs %}
+    <div class="breadcrumbs">
+        <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
+        <a href="{% url 'admin:app_list' app_label=app_label %}">{{ opts.app_config.verbose_name|capfirst }}</a> &rsaquo;
+        {{ title }}
+    </div>
+{% endblock %}
+
+{% block content_title %}<h1>{{ title }}</h1>{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    {% if messages %}
+        <ul class="messagelist">{% for message in messages %}<li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message|capfirst }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <div class="filter-form">
+        <form method="get" action="{% url 'reports:all_employees_salary_report' %}">
+            <label for="id_month">Месяц:</label>
+            <input type="number" name="month" id="id_month" value="{{ selected_month }}" min="1" max="12">
+            <label for="id_year">Год:</label>
+            <input type="number" name="year" id="id_year" value="{{ selected_year }}" min="2020" max="2099">
+            <label for="id_employee">Сотрудник:</label>
+            <select name="employee_id" id="id_employee">
+                <option value="">Все сотрудники</option>
+                {% for emp in all_employees %}
+                    <option value="{{ emp.id }}" {% if emp.id == selected_employee_id %}selected{% endif %}>
+                        {{ emp.first_name|default:emp.username }}
+                    </option>
+                {% endfor %}
+            </select>
+            <input type="submit" value="Показать отчет">
+        </form>
+    </div>
+
+    <div class="period-navigation">
+        <a href="{{ prev_month_url }}">&laquo; Предыдущий месяц</a>
+        <span class="current-period">{{ selected_month|stringformat:"02d" }}.{{ selected_year }}</span>
+        {% if next_month_url %}
+            <a href="{{ next_month_url }}">Следующий месяц &raquo;</a>
+        {% else %}
+            <span>Следующий месяц &raquo;</span>
+        {% endif %}
+    </div>
+
+    {% if report_data %}
+        <table class="report-table">
+            <thead>
+                <tr>
+                    <th>Сотрудник</th>
+                    <th class="amount">Входящий остаток</th>
+                    <th class="amount">Начислено за период</th>
+                    <th class="amount">Выплачено за период</th>
+                    <th class="amount">Исходящий остаток</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for data_row in report_data %}
+                    <tr>
+                        <td>{{ data_row.employee_name }}</td>
+                        <td class="amount">{{ data_row.opening_balance|floatformat:2 }}</td>
+                        <td class="amount">{{ data_row.accrued_period|floatformat:2 }}</td>
+                        <td class="amount">{{ data_row.paid_period|floatformat:2 }}</td>
+                        <td class="amount"><strong>{{ data_row.closing_balance|floatformat:2 }}</strong></td>
+                        <td>
+                            <a href="{% url 'utils:my_salary_report' %}?year={{ selected_year }}&month={{ selected_month }}&employee_id_for_user_report={{ data_row.employee_id }}">
+                                Детали
+                            </a>
+                            {# Примечание: ссылка на my_salary_report должна быть доработана, чтобы принимать employee_id #}
+                            {# и если report_user != request.user, то проверять право view_all_employee_salaries #}
+                            {# Пока что, ссылка будет вести на отчет текущего залогиненного пользователя #}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td><strong>ИТОГО по всем:</strong></td>
+                    <td class="amount"><strong>{{ grand_total_opening_balance|floatformat:2 }}</strong></td>
+                    <td class="amount"><strong>{{ grand_total_accrued_for_period|floatformat:2 }}</strong></td>
+                    <td class="amount"><strong>{{ grand_total_paid_for_period|floatformat:2 }}</strong></td>
+                    <td class="amount"><strong>{{ grand_total_closing_balance|floatformat:2 }}</strong></td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    {% else %}
+        <p>Данных для отображения по выбранным фильтрам не найдено.</p>
+    {% endif %}
+</div>
+{% endblock %}

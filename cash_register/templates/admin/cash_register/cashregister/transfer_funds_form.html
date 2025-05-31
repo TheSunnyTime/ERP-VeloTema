@@ -1,0 +1,58 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    {# Сюда можно добавить специфичные стили для этой формы, если потребуется #}
+{% endblock %}
+
+{% block breadcrumbs %}
+    <div class="breadcrumbs">
+        <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
+        <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name|capfirst }}</a> &rsaquo;
+        <a href="{% url 'admin:cash_register_cashregister_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a> &rsaquo;
+        {{ title }}
+    </div>
+{% endblock %}
+
+{% block content_title %}
+    <h1>{{ title }}</h1>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <form method="post" novalidate>
+        {% csrf_token %}
+        <div>
+            {% if form.non_field_errors %}
+                <p class="errornote">
+                    {% for error in form.non_field_errors %}
+                        {{ error }}<br>
+                    {% endfor %}
+                </p>
+            {% endif %}
+
+            <fieldset class="module aligned">
+                <h2>Детали перемещения</h2>
+                <p>Из кассы: <strong>{{ source_cash_register.name }}</strong> (Текущий баланс: {{ source_cash_register.current_balance }} руб.)</p>
+                
+                {% for field in form %}
+                    <div class="form-row{% if field.errors %} errors{% endif %}">
+                        {{ field.errors }}
+                        {{ field.label_tag }}
+                        {{ field }}
+                        {% if field.help_text %}
+                            <div class="help">{{ field.help_text|safe }}</div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </fieldset>
+
+            <div class="submit-row">
+                <input type="submit" value="Подтвердить перемещение" class="default">
+                <a href="{% url 'admin:cash_register_cashregister_changelist' %}" class="button cancel-link">Отмена</a>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

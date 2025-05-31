@@ -1,0 +1,57 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %} {# Добавил static для {% static ... %} если понадобится в будущем #}
+
+{% block extrastyle %}
+    {{ block.super }}
+    {# Сюда можно добавить специфичные стили для этой страницы, если нужно #}
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
+    {# app_label здесь будет 'utils', а verbose_name 'Сервис' из UtilsConfig #}
+    {# Если 'opts' не передается в контекст или app_label из opts не 'utils', используем 'utils' явно #}
+    <a href="{% url 'admin:app_list' app_label=app_label|default:'utils' %}">{{ app_verbose_name|default:'Сервис' }}</a> &rsaquo;
+    {{ title }}
+</div>
+{% endblock %}
+
+{% block content_title %}<h1>{{ title }}</h1>{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    {% if messages %}
+        <ul class="messagelist">
+        {% for message in messages %}
+            <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+        {% endfor %}
+        </ul>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="submit-row">
+            <input type="submit" value="{% translate 'Импортировать' %}">
+            {# Ссылка отмены может вести на главную админки или на список продуктов #}
+            <a href="{% url 'admin:products_product_changelist' %}" class="button cancel-link">{% translate 'К списку товаров' %}</a>
+            <a href="{% url 'admin:index' %}" class="button cancel-link">{% translate 'Отмена (на главную)' %}</a>
+        </div>
+    </form>
+    <br>
+    <div>
+        <p><strong>Формат CSV файла:</strong></p>
+        <p>Колонки: <code>Артикул, Название, Кол-во, Вход:, РЦ:</code> (остальные колонки игнорируются)</p>
+        <p>Разделитель: запятая (<code>,</code>). Кодировка: UTF-8.</p>
+        <p>Десятичный разделитель в ценах: точка (<code>.</code>) или запятая (<code>,</code>) (будет заменена на точку).</p>
+        <p><strong>Правила обработки:</strong></p>
+        <ul>
+            <li>Идентификация существующего товара происходит по полю "Название".</li>
+            <li>Если товар с "Названием" найден, его Артикул, Кол-во, Вход, РЦ будут обновлены.</li>
+            <li>Если не найден, будет создан новый товар.</li>
+            <li>Если "РЦ:" пустое/некорректное, РЦ = Вход.</li>
+            <li>Категория товара из этого импорта не обновляется.</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

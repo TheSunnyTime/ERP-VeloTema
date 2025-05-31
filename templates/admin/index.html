@@ -1,0 +1,129 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static log tz l10n cash_register_admin_tags %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static "admin/css/dashboard.css" %}">
+  <style>
+    /* --- Стили для изменения ширины основных колонок админки (оставляем как есть из turn 241) --- */
+    @media (min-width: 1024px) { 
+        body.colMS #content-main {
+            width: calc(100% - 520px - 2rem); 
+        }
+        body.colMS #content-related {
+            width: 500px; 
+            margin-left: 2rem; 
+        }
+    }
+    @media (min-width: 768px) and (max-width: 1023px) {
+         body.colMS #content-main {
+            width: calc(100% - 420px - 1rem); 
+        }
+        body.colMS #content-related {
+            width: 400px; 
+            margin-left: 1rem;
+        }
+    }
+
+    /* --- Стили для расположения блоков ВНУТРИ сайдбара --- */
+    .dashboard-sidebar-row {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;     /* Оставляем nowrap, так как на узком экране они у вас корректно отображались в ряд */
+      align-items: stretch;  /* <--- ИЗМЕНЕНИЕ: теперь 'stretch' вместо 'flex-start' */
+      gap: 15px;          
+      margin-bottom: 20px;
+    }
+
+    /* Общие стили для модулей в этом ряду (оставляем как в turn 245) */
+    .dashboard-sidebar-row > .module {
+      border: 1px solid var(--hairline-color, #e5e5e5);
+      padding: 10px;
+      box-sizing: border-box;
+      margin: 0 !important; 
+      overflow: hidden; 
+      /* display: flex; flex-direction: column; */ /* Опционально: чтобы внутренний контент модуля тоже мог растягиваться, если нужно */
+    }
+
+    /* Специфичные стили для каждого модуля для управления шириной (оставляем как в turn 245) */
+    .dashboard-sidebar-row > #recent-actions-module {
+      flex-grow: 1;   
+      flex-shrink: 1; 
+      flex-basis: auto; 
+      min-width: 200px; 
+    }
+    .dashboard-sidebar-row > #cash-balances-dashboard-module { /* Убедитесь, что этот ID есть у блока с кассами */
+      flex-grow: 0;   
+      flex-shrink: 0; 
+      flex-basis: auto; 
+    }
+
+    /* ... (остальные стили для таблиц, заголовков, tooltip и т.д. остаются как были) ... */
+  </style>
+{% endblock %}
+
+{% block coltype %}colMS{% endblock %}
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+
+{% block nav-breadcrumbs %}{% endblock %}
+{% block nav-sidebar %}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% include "admin/app_list.html" with app_list=available_apps show_changelinks=True %}
+</div>
+{% endblock %}
+
+{% block sidebar %}
+<div id="content-related"> {# Это стандартный контейнер сайдбара Django, у него должна быть малиновая рамка #}
+
+    {# ----- НАША ОБЕРТКА ДЛЯ РАСПОЛОЖЕНИЯ В РЯД ----- #}
+    {# У этой обертки должна появиться лаймовая (зеленая) рамка #}
+    <div class="dashboard-sidebar-row"> 
+
+        {# Блок "Последние действия" - у него должна быть голубая рамка #}
+        <div class="module" id="recent-actions-module">
+            <h2>{% translate 'Recent actions' %}</h2>
+            <h3>{% translate 'My actions' %}</h3>
+            {% load log %} {# Убедитесь, что тег log загружен (обычно вверху шаблона) #}
+            {% get_admin_log 10 as admin_log for_user user %}
+            {% if not admin_log %}
+                <p>{% translate 'None available' %}</p>
+            {% else %}
+                <ul class="actionlist">
+                {% for entry in admin_log %}
+                <li class="{% if entry.is_addition %}addlink{% endif %}{% if entry.is_change %}changelink{% endif %}{% if entry.is_deletion %}deletelink{% endif %}">
+                    <time datetime="{{ entry.action_time.isoformat }}" class="action-time">
+                        {{ entry.action_time|localtime|date:"DATETIME_FORMAT" }}
+                    </time>
+                    <br> 
+                    <span class="visually-hidden">{% if entry.is_addition %}{% translate 'Added:' %}{% elif entry.is_change %}{% translate 'Changed:' %}{% elif entry.is_deletion %}{% translate 'Deleted:' %}{% endif %}</span>
+                    {% if entry.is_deletion or not entry.get_admin_url %}
+                        {{ entry.object_repr }}
+                    {% else %}
+                        <a href="{{ entry.get_admin_url }}">{{ entry.object_repr }}</a>
+                    {% endif %}
+                    {% if entry.content_type %}
+                        <span class="mini quiet"> (ID: {{ entry.object_id }}) {% filter capfirst %}{{ entry.content_type.name }}{% endfilter %}</span>
+                    {% else %}
+                        <span class="mini quiet">{% translate 'Unknown content' %}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+
+        {# Наш блок для касс (тег get_cash_register_balances рендерит <div class="module">...) #}
+        {# У него тоже должна быть голубая рамка #}
+        {% load cash_register_admin_tags %} {# Убедитесь, что тег cash_register_admin_tags загружен (обычно вверху шаблона) #}
+        {% get_cash_register_balances %} 
+
+    </div> {# ----- КОНЕЦ НАШЕЙ ОБЕРТКИ dashboard-sidebar-row ----- #}
+
+    {# Сюда можно добавлять другие модули, которые будут идти ПОД этим рядом #}
+
+</div>
+{% endblock %}
+
+{# ... (остальная часть вашего index.html) ... #}

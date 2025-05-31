@@ -1,0 +1,124 @@
+{% extends "admin/base_site.html" %}
+{% load static %} {# Если будете использовать статичные файлы в этом шаблоне #}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .report-summary { 
+      /* margin-left: 20px; Убрал, т.к. content-main уже имеет отступы */
+      margin-top: 20px; 
+    }
+    .report-summary h2 { /* Если у вас будут подзаголовки внутри отчета */
+      margin-bottom: 10px; 
+      color: var(--body-fg);
+    }
+    .report-summary table { 
+      width: auto; /* Или 100% если хотите на всю ширину блока */
+      border-collapse: collapse; 
+      margin-bottom: 20px; 
+    }
+    .report-summary th, .report-summary td { 
+      border: 1px solid var(--border-color, #ccc);
+      padding: 8px 12px; 
+      text-align: left; 
+      color: var(--body-fg); /* Основной цвет текста */
+    }
+    .report-summary th { /* Стили для ЗАГОЛОВКОВ ТАБЛИЦЫ */
+      background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); 
+      color: var(--table-header-fg, var(--header-fg, #333333)); 
+      font-weight: bold;
+    }
+    .report-summary td.value { /* Для ячеек со значениями (суммами) */
+      text-align: right; 
+      font-weight: bold;
+    }
+
+    /* Стили для всплывающей подсказки (tooltip) - оставляем адаптивными */
+    .tooltip {
+      position: relative;
+      display: inline-block;
+      cursor: help;
+      color: var(--link-fg); 
+    }
+    .tooltip .tooltiptext {
+      visibility: hidden;
+      width: 220px;
+      background-color: var(--body-quiet-color, #555);
+      color: var(--body-bg, #fff); 
+      text-align: center;
+      border-radius: 6px;
+      padding: 5px 0;
+      position: absolute;
+      z-index: 1;
+      bottom: 125%; 
+      left: 50%;
+      margin-left: -110px; 
+      opacity: 0;
+      transition: opacity 0.3s;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    .tooltip .tooltiptext::after {
+      content: "";
+      position: absolute;
+      top: 100%; 
+      left: 50%;
+      margin-left: -5px;
+      border-width: 5px;
+      border-style: solid;
+      border-color: var(--body-quiet-color, #555) transparent transparent transparent;
+    }
+    .tooltip:hover .tooltiptext {
+      visibility: visible;
+      opacity: 1;
+    }
+  </style>
+{% endblock %}
+
+{% block coltype %}colMS{% endblock %} {# Для отображения с левой боковой панелью, если она есть #}
+
+{% block bodyclass %}{{ block.super }} app-reports model-stocksummary{% endblock %}
+
+{% block content_title %}<h1>{{ title }}</h1>{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Главная</a> &rsaquo;
+    {# <a href="{% url 'admin:app_list' app_label='reports' %}">Отчеты</a> &rsaquo; #}
+    {{ title }}
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div id="content-main">
+    {% if has_permission %}
+      <div class="report-summary">
+        <table>
+          <tr>
+            <th>Показатель</th>
+            <th>Сумма</th>
+          </tr>
+          <tr>
+            <td>Общая оптовая сумма всех товаров на складе</td>
+            <td class="value">{{ total_wholesale_value|floatformat:2 }} руб.</td>
+          </tr>
+          <tr>
+            <td>Общая розничная сумма всех товаров на складе</td>
+            <td class="value">{{ total_retail_value|floatformat:2 }} руб.</td>
+          </tr>
+          <tr>
+            <td>
+              Ожидаемая прибыль от продажи всех товаров
+              <div class="tooltip">
+                &#9432; {# Знак информации (i в кружке) #}
+                <span class="tooltiptext">{{ profit_calculation_hint }}</span>
+              </div>
+            </td>
+            <td class="value">{{ expected_profit|floatformat:2 }} руб.</td>
+          </tr>
+        </table>
+      </div>
+    {% else %}
+      <p>У вас нет прав для просмотра этого отчета.</p>
+    {% endif %}
+  </div>
+{% endblock %}

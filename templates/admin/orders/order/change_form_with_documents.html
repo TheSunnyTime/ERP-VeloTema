@@ -1,0 +1,28 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block object-tools %}
+    {# Сначала стандартные инструменты объекта (кнопки Сохранить и т.д.) #}
+    {{ block.super }}
+
+    {# Затем добавляем наши кнопки для документов #}
+    {% if available_document_templates %}
+        <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--hairline-color);">
+            <h4 style="margin-bottom: 5px;">{% translate "Сформировать документ:" %}</h4>
+            <ul class="object-tools">
+                {% for template in available_document_templates %}
+                    <li>
+                        {# original - это переменная контекста в change_form.html, содержащая текущий объект (Заказ) #}
+                        {# Мы используем current_object_id, который передали из view OrderAdmin.change_view #}
+                        {# ----- ИСПРАВЛЕНИЕ ЗДЕСЬ ----- #}
+                        <a href="{% url 'utils:generate_document' template.id current_object_id %}" 
+                           class="button" 
+                           target="_blank"> {# Открываем в новой вкладке #}
+                            {{ template.name }}
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+{% endblock %}

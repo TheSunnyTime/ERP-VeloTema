@@ -1,0 +1,30 @@
+{% load i18n l10n %}
+
+<div class="module" id="cash-balances-dashboard-module">
+    <h2>Остатки по кассам</h2>
+    {% if cash_registers %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Касса</th>
+                    <th style="text-align: right;">Баланс</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cr in cash_registers %}
+                    <tr>
+                        <td>
+                            {# Позже здесь можно будет сделать ссылку на страницу этой кассы, если нужно #}
+                            {{ cr.name }}
+                        </td>
+                        <td style="text-align: right;">
+                            {{ cr.current_balance|floatformat:2 }} руб.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>{% translate 'Нет доступных активных касс для отображения.' %}</p>
+    {% endif %}
+</div>
