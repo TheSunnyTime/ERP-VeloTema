@@ -1,19 +1,19 @@
 {% extends "admin/base_site.html" %}
-{% load static %} {# Если будете использовать статичные файлы в этом шаблоне #}
+{% load static %} 
 
 {% block extrastyle %}
   {{ block.super }}
   <style>
+    /* ... (твои стили остаются без изменений) ... */
     .report-summary { 
-      /* margin-left: 20px; Убрал, т.к. content-main уже имеет отступы */
       margin-top: 20px; 
     }
-    .report-summary h2 { /* Если у вас будут подзаголовки внутри отчета */
+    .report-summary h2 {
       margin-bottom: 10px; 
       color: var(--body-fg);
     }
     .report-summary table { 
-      width: auto; /* Или 100% если хотите на всю ширину блока */
+      width: auto; 
       border-collapse: collapse; 
       margin-bottom: 20px; 
     }
@@ -21,19 +21,17 @@
       border: 1px solid var(--border-color, #ccc);
       padding: 8px 12px; 
       text-align: left; 
-      color: var(--body-fg); /* Основной цвет текста */
+      color: var(--body-fg);
     }
-    .report-summary th { /* Стили для ЗАГОЛОВКОВ ТАБЛИЦЫ */
+    .report-summary th {
       background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); 
       color: var(--table-header-fg, var(--header-fg, #333333)); 
       font-weight: bold;
     }
-    .report-summary td.value { /* Для ячеек со значениями (суммами) */
+    .report-summary td.value {
       text-align: right; 
       font-weight: bold;
     }
-
-    /* Стили для всплывающей подсказки (tooltip) - оставляем адаптивными */
     .tooltip {
       position: relative;
       display: inline-block;
@@ -74,23 +72,20 @@
   </style>
 {% endblock %}
 
-{% block coltype %}colMS{% endblock %} {# Для отображения с левой боковой панелью, если она есть #}
-
+{% block coltype %}colMS{% endblock %}
 {% block bodyclass %}{{ block.super }} app-reports model-stocksummary{% endblock %}
-
 {% block content_title %}<h1>{{ title }}</h1>{% endblock %}
 
 {% block breadcrumbs %}
   <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">Главная</a> &rsaquo;
-    {# <a href="{% url 'admin:app_list' app_label='reports' %}">Отчеты</a> &rsaquo; #}
     {{ title }}
   </div>
 {% endblock %}
 
 {% block content %}
   <div id="content-main">
-    {% if has_permission %}
+    {% if user_can_view_this_specific_report %} {# Или просто if user.is_staff или твоя проверка прав #}
       <div class="report-summary">
         <table>
           <tr>
@@ -98,8 +93,8 @@
             <th>Сумма</th>
           </tr>
           <tr>
-            <td>Общая оптовая сумма всех товаров на складе</td>
-            <td class="value">{{ total_wholesale_value|floatformat:2 }} руб.</td>
+            <td>Общая себестоимость товаров на складе</td> {# Измененная метка #}
+            <td class="value">{{ total_cost_value|floatformat:2 }} руб.</td> {# Используем total_cost_value из view #}
           </tr>
           <tr>
             <td>Общая розничная сумма всех товаров на складе</td>
@@ -109,13 +104,49 @@
             <td>
               Ожидаемая прибыль от продажи всех товаров
               <div class="tooltip">
-                &#9432; {# Знак информации (i в кружке) #}
+                &#9432;
                 <span class="tooltiptext">{{ profit_calculation_hint }}</span>
               </div>
             </td>
             <td class="value">{{ expected_profit|floatformat:2 }} руб.</td>
           </tr>
         </table>
+        
+        {% if products_in_stock %}
+          <h2>Детализация по товарам на складе:</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Наименование товара</th>
+                <th>Артикул</th>
+                <th>Категория</th>
+                <th>Остаток</th>
+                <th>Себестоимость (ед.)</th>
+                <th>Розничная цена (ед.)</th>
+                <th>Общая себестоимость</th> {# Новая колонка #}
+                <th>Общая розничная стоимость</th> {# Новая колонка #}
+              </tr>
+            </thead>
+            <tbody>
+              {% for product in products_in_stock %}
+                <tr>
+                  <td>{{ product.name }}</td>
+                  <td>{{ product.sku|default_if_none:"" }}</td>
+                  <td>{{ product.category.name|default_if_none:"" }}</td>
+                  <td class="value">{{ product.stock_quantity }}</td>
+                  <td class="value">{{ product.cost_price|floatformat:2 }}</td> 
+                  <td class="value">{{ product.retail_price|floatformat:2 }}</td>
+                  {# --- ИЗМЕНЕНИЕ ЗДЕСЬ --- #}
+                  <td class="value"> {{ product.total_cost_value_in_stock|floatformat:2 }} </td> 
+                  <td class="value">{{ product.total_retail_value_in_stock|floatformat:2 }}</td>
+                  {# --- КОНЕЦ ИЗМЕНЕНИЯ --- #}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>Нет товаров на складе для отображения в детализации.</p>
+        {% endif %}
       </div>
     {% else %}
       <p>У вас нет прав для просмотра этого отчета.</p>

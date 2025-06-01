@@ -1,42 +1,38 @@
 # F:\CRM 2.0\ERP\utils\views.py
+# ... (импорты оставляем как есть) ...
 from django.shortcuts import render, get_object_or_404
 from django.http import HttpResponse, HttpResponseRedirect, HttpResponseServerError, JsonResponse
 from django.urls import reverse
 from django.contrib import admin, messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db import transaction, models # models импортирован для models.Sum
+from django.db import transaction, models 
 from django.contrib.contenttypes.models import ContentType
-import re # Для регулярных выражений
-from django.utils import timezone # Для timezone.now()
+import re 
+from django.utils import timezone 
 from django.contrib.auth import get_user_model
-from django.db.models import Sum # Явный импорт Sum
+from django.db.models import Sum
 
-# Импорты моделей из других приложений
 from products.models import Product
-from orders.models import Order, OrderType, OrderServiceItem, OrderProductItem # Добавил OrderProductItem
+from orders.models import Order, OrderType, OrderServiceItem, OrderProductItem
 # from clients.models import Client # Client получаем через order.client
 
 from .forms import CsvImportForm
-from .models import ProductPriceImporter, DocumentType, DocumentTemplate # Модели, которые остаются в utils.models
+from .models import ProductPriceImporter, DocumentType, DocumentTemplate 
 
-# --- ИМПОРТ ЗАРПЛАТНЫХ МОДЕЛЕЙ ИЗ salary_management ---
 from salary_management.models import SalaryCalculation, SalaryPayment
-# EmployeeRate и SalaryCalculationDetail не используются напрямую в этих view из utils.views,
-# но если бы использовались, импортировались бы также из salary_management.models
 
 from django.utils.dateformat import DateFormat
-from django.utils.formats import get_format # Для форматирования дат/времени
-from datetime import date, timedelta # Для employee_salary_report_view
+from django.utils.formats import get_format 
+from datetime import date, timedelta 
 
 import csv
-from decimal import Decimal, InvalidOperation # Убедись, что Decimal импортирован
+from decimal import Decimal, InvalidOperation
 
 User = get_user_model()
 
+# ... (функция product_csv_import_view остается без изменений) ...
 def product_csv_import_view(request):
-    # ... (твой существующий код product_csv_import_view без изменений, как ты его прислал) ...
-    # (Я его не повторяю для краткости)
     print("[CSV Import View] Entered view function.")
     if not request.user.has_perm('utils.can_import_product_prices') and not request.user.is_superuser:
         raise PermissionDenied("У тебя нет прав для импорта прайс-листов товаров.")
@@ -72,17 +68,25 @@ def product_csv_import_view(request):
                                     quantity = 0
                                     try: quantity = int(csv_quantity_str) if csv_quantity_str else 0
                                     except ValueError: skipped_rows_details.append(f"Строка {i}, товар '{csv_name}': неверное Кол-во '{csv_quantity_str}'."); continue
-                                    wholesale_price = Decimal('0.00')
+                                    
+                                    # Используем cost_price вместо wholesale_price, если ты его переименовал в модели Product
+                                    cost_price_val = Decimal('0.00') 
                                     try:
-                                        if not csv_wholesale_price_str: skipped_rows_details.append(f"Строка {i}, товар '{csv_name}': отсутствует Вход (ОПТ)."); continue
-                                        wholesale_price = Decimal(csv_wholesale_price_str)
-                                    except InvalidOperation: skipped_rows_details.append(f"Строка {i}, товар '{csv_name}': неверное значение ОПТ '{csv_wholesale_price_str}'."); continue
-                                    retail_price = wholesale_price
+                                        if not csv_wholesale_price_str: # Предполагаем, что это колонка себестоимости
+                                            skipped_rows_details.append(f"Строка {i}, товар '{csv_name}': отсутствует Себестоимость (бывш. ОПТ)."); continue
+                                        cost_price_val = Decimal(csv_wholesale_price_str)
+                                    except InvalidOperation: 
+                                        skipped_rows_details.append(f"Строка {i}, товар '{csv_name}': неверное значение Себестоимости '{csv_wholesale_price_str}'."); continue
+                                    
+                                    retail_price = cost_price_val # По умолчанию РЦ = Себестоимость, если РЦ не указана
                                     if csv_retail_price_str:
                                         try: retail_price = Decimal(csv_retail_price_str)
-                                        except InvalidOperation: print(f"[CSV Import] Строка {i}, товар '{csv_name}': неверное РЦ '{csv_retail_price_str}', РЦ=ОПТ.")
-                                    product_defaults = {'sku': csv_sku, 'stock_quantity': quantity, 'wholesale_price': wholesale_price, 'retail_price': retail_price}
+                                        except InvalidOperation: print(f"[CSV Import] Строка {i}, товар '{csv_name}': неверное РЦ '{csv_retail_price_str}', РЦ=Себестоимость.")
+                                    
+                                    # Убедись, что в product_defaults используется правильное имя поля себестоимости (cost_price)
+                                    product_defaults = {'sku': csv_sku, 'stock_quantity': quantity, 'cost_price': cost_price_val, 'retail_price': retail_price}
                                     obj_product, created = Product.objects.update_or_create(name=csv_name, defaults=product_defaults)
+                                    
                                     if created: imported_count += 1
                                     else: updated_count += 1
                                 except Exception as e_row: skipped_rows_details.append(f"Строка {i} ({csv_name or csv_sku or 'Неизвестно'}): Внутренняя ошибка - {e_row}"); continue
@@ -98,10 +102,9 @@ def product_csv_import_view(request):
     context = { **admin.site.each_context(request), 'title': 'Импорт прайс-листа товаров из CSV', 'form': form, 'app_label': 'utils', 'opts': ProductPriceImporter._meta }
     try: return render(request, 'admin/utils/product_csv_import_form.html', context)
     except Exception as e_render: import traceback; traceback.print_exc(); return HttpResponseServerError(f"Ошибка на сервере при отображении страницы импорта: {e_render}")
-    return HttpResponseServerError("Непредвиденная ошибка: view завершилась без ответа.")
+    # return HttpResponseServerError("Непредвиденная ошибка: view завершилась без ответа.") # Это было в твоем коде, но лучше иметь return render
 
 
-# --- ОБНОВЛЕННАЯ ФУНКЦИЯ generate_document_view ---
 @login_required
 def generate_document_view(request, template_id, object_id):
     doc_template = get_object_or_404(DocumentTemplate, pk=template_id, is_active=True)
@@ -112,11 +115,23 @@ def generate_document_view(request, template_id, object_id):
         model_class = content_type_obj.model_class() 
         if model_class is None: 
             raise AttributeError(f"Не удалось определить класс модели для ContentType: {content_type_obj}")
-        # Оптимизируем запрос, подтягивая связанные объекты сразу
+        
+        # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
         if model_class == Order:
-            related_object = get_object_or_404(model_class.objects.select_related('client', 'employee', 'order_type'), pk=object_id)
+            # Заменяем 'employee' на 'manager' и добавляем 'performer' для оптимизации
+            related_object = get_object_or_404(
+                model_class.objects.select_related(
+                    'client', 
+                    'manager', # Было 'employee'
+                    'performer', # Добавили на всякий случай
+                    'order_type'
+                ), 
+                pk=object_id
+            )
         else:
             related_object = get_object_or_404(model_class, pk=object_id)
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+            
     except AttributeError as e:
         error_msg = f"Ошибка определения связанной модели для типа документа '{doc_template.document_type.name}': {e}"
         messages.error(request, error_msg)
@@ -127,70 +142,67 @@ def generate_document_view(request, template_id, object_id):
         return HttpResponseRedirect(request.META.get('HTTP_REFERER', reverse('admin:index')))
 
     placeholder_data = {}
-    # Общие плейсхолдеры для любого объекта
     placeholder_data['object_id'] = str(related_object.pk)
-    # Можно добавить #object_str# = str(related_object)
 
-    # Данные Исполнителя (как в примере PDF "Заказ #1849 - HelloClient.pdf")
-    placeholder_data['Исполнитель_Лого_Текст'] = "ВЕЛОТЕМА РЕМОНТ ВЕЛОСИПЕДОВ" # Для текстового лого
+    placeholder_data['Исполнитель_Лого_Текст'] = "ВЕЛОТЕМА РЕМОНТ ВЕЛОСИПЕДОВ" 
     placeholder_data['Исполнитель_Наименование_Полное'] = 'ООО "Рейвен Плюс"'
     placeholder_data['Исполнитель_УНП'] = "193760657"
     placeholder_data['Исполнитель_Адрес'] = "Г. Минск, Ул. Калиновского 68А, помещение 9"
-    # placeholder_data['Исполнитель_Телефон'] = "ВАШ_ТЕЛЕФОН_ИСПОЛНИТЕЛЯ" # Если нужен
-    # placeholder_data['QR_Код_Отзыв_URL'] = "URL_ДЛЯ_QR_КОДА" # Если нужен
 
     if isinstance(related_object, Order):
         order = related_object
         placeholder_data['Номер_Заказа'] = str(order.id)
-        placeholder_data['Дата_Заказа'] = DateFormat(order.created_at).format(get_format('SHORT_DATE_FORMAT')) # дд.мм.гггг
-        placeholder_data['Время_Заказа'] = DateFormat(order.created_at).format(get_format('TIME_FORMAT')) # чч:мм
-        
-        # Для "Дата и время составления акта" и "Дата выдачи" из примера PDF,
-        # используем order.updated_at, предполагая, что это время последнего изменения заказа (например, выдачи)
-        placeholder_data['Дата_Время_Акта'] = DateFormat(order.updated_at).format(get_format('DATETIME_FORMAT')) # дд.мм.гггг ЧЧ:ММ:СС
-        placeholder_data['Дата_Акта_Короткая'] = DateFormat(order.updated_at).format(get_format('SHORT_DATE_FORMAT')) # дд.мм.гггг
-
+        placeholder_data['Дата_Заказа'] = DateFormat(order.created_at).format(get_format('SHORT_DATE_FORMAT'))
+        placeholder_data['Время_Заказа'] = DateFormat(order.created_at).format(get_format('TIME_FORMAT')) 
+        placeholder_data['Дата_Время_Акта'] = DateFormat(order.updated_at).format(get_format('DATETIME_FORMAT'))
+        placeholder_data['Дата_Акта_Короткая'] = DateFormat(order.updated_at).format(get_format('SHORT_DATE_FORMAT'))
         placeholder_data['Статус_Заказа'] = str(order.get_status_display())
         placeholder_data['Тип_Заказа'] = str(order.order_type.name) if order.order_type else "Не определен"
         placeholder_data['Общая_Сумма_Заказа'] = f"{order.calculate_total_amount():.2f}"
         placeholder_data['Заказ_Примечания'] = str(order.notes or "")
         
-        # Описание велосипеда (извлекаем из примечаний, как в примере PDF)
         bike_desc_match = re.search(r"Велосипед:([^\n]+)", order.notes or "", re.IGNORECASE)
         placeholder_data['Велосипед_Описание'] = bike_desc_match.group(1).strip() if bike_desc_match else ""
-
 
         if order.client:
             placeholder_data['Клиент_Имя'] = str(order.client.name)
             placeholder_data['Клиент_Телефон'] = str(order.client.phone or "")
             placeholder_data['Клиент_Email'] = str(order.client.email or "")
-            placeholder_data['Клиент_Адрес'] = str(order.client.address or "#Клиент_Адрес#") # Если пусто, оставляем как плейсхолдер
+            placeholder_data['Клиент_Адрес'] = str(order.client.address or "#Клиент_Адрес#")
             placeholder_data['Клиент_КонтактноеЛицо'] = str(order.client.contact_person or "")
         
-        if order.employee:
-            employee_name_for_act = order.employee.first_name if order.employee.first_name else order.employee.username
-            placeholder_data['Сотрудник_Имя_Акта'] = str(employee_name_for_act) # Для подписи "Менеджер: Имя"
-            placeholder_data['Сотрудник_ФИО'] = str(order.employee.get_full_name() or order.employee.username)
-            # placeholder_data['Сотрудник_Должность'] = "Менеджер" # Если должность фиксированная
+        # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: ИСПОЛЬЗУЕМ manager ---
+        if order.manager: # Раньше было order.employee
+            employee_name_for_act = order.manager.first_name if order.manager.first_name else order.manager.username
+            placeholder_data['Сотрудник_Имя_Акта'] = str(employee_name_for_act) 
+            placeholder_data['Сотрудник_ФИО'] = str(order.manager.get_full_name() or order.manager.username)
+            # Если ты хочешь отображать и Исполнителя (performer):
+            if order.performer:
+                 placeholder_data['Исполнитель_Заказа_ФИО'] = str(order.performer.get_full_name() or order.performer.username)
+                 placeholder_data['Исполнитель_Заказа_Имя_Акта'] = str(order.performer.first_name if order.performer.first_name else order.performer.username)
+            else:
+                 placeholder_data['Исполнитель_Заказа_ФИО'] = "" # Или "Не назначен"
+                 placeholder_data['Исполнитель_Заказа_Имя_Акта'] = ""
+        else:
+            placeholder_data['Сотрудник_Имя_Акта'] = "Не назначен"
+            placeholder_data['Сотрудник_ФИО'] = "Не назначен"
+            placeholder_data['Исполнитель_Заказа_ФИО'] = ""
+            placeholder_data['Исполнитель_Заказа_Имя_Акта'] = ""
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
-    # Сначала заменяем все одиночные плейсхолдеры
     processed_content = doc_template.template_content
     for key, value in placeholder_data.items():
-        # Оборачиваем ключ в #...# для замены
         processed_content = processed_content.replace(f"#{key}#", str(value))
 
-    # Обработка списка позиций (товары и услуги вместе)
     if isinstance(related_object, Order):
         order = related_object
-        # Используем общий блок #СписокПозиций_Начало# ... #СписокПозиций_Конец#
         items_block_match = re.search(r"#СписокПозиций_Начало#(.*?)#СписокПозиций_Конец#", processed_content, re.DOTALL | re.IGNORECASE)
         
         if items_block_match:
-            item_template_str = items_block_match.group(1).strip() # Шаблон строки из документа
+            item_template_str = items_block_match.group(1).strip()
             rendered_all_items = []
             current_index = 0
 
-            # Сначала товары
             for p_item in order.product_items.all().select_related('product'):
                 current_index += 1
                 row_content = item_template_str
@@ -202,34 +214,28 @@ def generate_document_view(request, template_id, object_id):
                 item_total = p_item.get_item_total() if p_item.get_item_total() is not None else Decimal('0.00')
                 row_content = row_content.replace("#Поз_Цена#", f"{item_price:.2f}")
                 row_content = row_content.replace("#Поз_Сумма#", f"{item_total:.2f}")
-                # Заглушки для гарантии и скидки (пока этих полей нет в моделях OrderProductItem/Product)
                 row_content = row_content.replace("#Поз_Гарантия#", "14 дн.") 
                 row_content = row_content.replace("#Поз_Скидка#", "0.00")
                 rendered_all_items.append(row_content)
 
-            # Затем услуги
             for s_item in order.service_items.all().select_related('service'):
                 current_index += 1
                 row_content = item_template_str
                 row_content = row_content.replace("#Поз_Номер#", str(current_index))
                 row_content = row_content.replace("#Поз_Наименование#", str(s_item.service.name))
-                row_content = row_content.replace("#Поз_Артикул#", "") # У услуг нет артикула
+                row_content = row_content.replace("#Поз_Артикул#", "")
                 row_content = row_content.replace("#Поз_Количество#", str(s_item.quantity))
                 item_price = s_item.price_at_order if s_item.price_at_order is not None else Decimal('0.00')
                 item_total = s_item.get_item_total() if s_item.get_item_total() is not None else Decimal('0.00')
                 row_content = row_content.replace("#Поз_Цена#", f"{item_price:.2f}")
                 row_content = row_content.replace("#Поз_Сумма#", f"{item_total:.2f}")
-                # Заглушки для гарантии и скидки (пока этих полей нет в моделях OrderServiceItem/Service)
                 row_content = row_content.replace("#Поз_Гарантия#", "14 дн.") 
                 row_content = row_content.replace("#Поз_Скидка#", "0.00")
                 rendered_all_items.append(row_content)
             
-            # Заменяем весь блок списка позиций на сгенерированные строки
             processed_content = processed_content.replace(items_block_match.group(0), "\n".join(rendered_all_items))
         else:
             print("[Generate Document View] Общий блок #СписокПозиций_Начало#...#СписокПозиций_Конец# не найден в HTML-шаблоне документа.")
-            # Опционально: если общий блок не найден, можно попытаться обработать старые раздельные блоки
-            # (но это усложнит код, лучше перейти на единый формат #СписокПозиций#)
 
     html_content_final = processed_content
     final_page_context = {
@@ -242,11 +248,10 @@ def generate_document_view(request, template_id, object_id):
     }
     return render(request, 'admin/utils/document_preview.html', final_page_context)
 
-# --- Существующая функция employee_salary_report_view ---
-@login_required
+# ... (остальные view, такие как employee_salary_report_view и get_employee_balance_api, остаются без изменений на этом шаге) ...
+# ... (Я их не повторяю для краткости, но они должны остаться в файле) ...
 def employee_salary_report_view(request):
     # ... (твой существующий код employee_salary_report_view без изменений) ...
-    # (Я его не повторяю для краткости)
     report_user = request.user; today = timezone.now().date()
     selected_year = None; selected_month = None
     try: selected_year = int(request.GET.get('year', ''))
@@ -286,18 +291,16 @@ def employee_salary_report_view(request):
     context = { **admin.site.each_context(request), 'title': f'Отчет по зарплате для {report_user.first_name or report_user.username} за {selected_month:02}.{selected_year}', 'report_user_display': report_user.first_name if report_user.first_name else report_user.username, 'selected_year': selected_year, 'selected_month': selected_month, 'opening_balance': opening_balance, 'salary_calculations': salary_calculations, 'total_accrued_for_current_period': total_accrued_for_current_period, 'salary_payments': salary_payments, 'total_paid_for_current_period': total_paid_for_current_period, 'closing_balance': closing_balance, 'has_permission': True, 'app_label': 'reports', 'prev_month_url': prev_month_url, 'next_month_url': next_month_url, 'is_current_month_selected': (selected_year == today.year and selected_month == today.month)}
     return render(request, 'admin/utils/employee_salary_report.html', context)
 
-# --- Существующая API View-функция get_employee_balance_api ---
 @login_required 
 def get_employee_balance_api(request, employee_id):
     # ... (твой существующий код get_employee_balance_api без изменений) ...
-    # (Я его не повторяю для краткости, но он должен остаться здесь)
     if not request.user.is_staff: return JsonResponse({'error': 'Доступ запрещен'}, status=403)
-    try: employee = User.objects.get(pk=employee_id)
+    try: employee_obj = User.objects.get(pk=employee_id) # Переименовал employee в employee_obj для ясности
     except User.DoesNotExist: return JsonResponse({'error': 'Сотрудник не найден'}, status=404)
-    total_accrued_data = SalaryCalculation.objects.filter(employee=employee).aggregate(total=Sum('total_calculated_amount'))
+    total_accrued_data = SalaryCalculation.objects.filter(employee=employee_obj).aggregate(total=Sum('total_calculated_amount'))
     total_accrued = total_accrued_data['total'] or Decimal('0.00')
-    total_paid_data = SalaryPayment.objects.filter(employee=employee).aggregate(total=Sum('amount_paid'))
+    total_paid_data = SalaryPayment.objects.filter(employee=employee_obj).aggregate(total=Sum('amount_paid'))
     total_paid = total_paid_data['total'] or Decimal('0.00')
     current_balance = total_accrued - total_paid
-    data = {'employee_id': employee.id, 'employee_name': employee.first_name if employee.first_name else employee.username, 'current_balance': f"{current_balance:.2f}", 'total_accrued': f"{total_accrued:.2f}", 'total_paid': f"{total_paid:.2f}"}
+    data = {'employee_id': employee_obj.id, 'employee_name': employee_obj.first_name if employee_obj.first_name else employee_obj.username, 'current_balance': f"{current_balance:.2f}", 'total_accrued': f"{total_accrued:.2f}", 'total_paid': f"{total_paid:.2f}"}
     return JsonResponse(data)
