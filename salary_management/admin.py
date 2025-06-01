@@ -2,12 +2,18 @@
 from django.contrib import admin
 from django.db.models import F, Max # Импортируем Max для получения процента
 from decimal import Decimal # Импортируем Decimal
+from django.urls import reverse # Добавь, если еще нет
+from django.http import HttpResponseRedirect # Добавь, если еще нет
+from django.core.exceptions import PermissionDenied # Добавь, если еще нет
+from django.contrib import messages # Добавь, если еще нет
+
+from reports.models import AllEmployeesSalaryReportProxy #
 from .models import (
     EmployeeRate, 
     SalaryCalculation, 
     SalaryPayment, 
     SalaryCalculationDetail, 
-    ProductSalaryDetail
+    ProductSalaryDetail 
 )
 
 @admin.register(EmployeeRate)
@@ -161,3 +167,30 @@ class SalaryPaymentAdmin(admin.ModelAdmin):
         if not obj.pk:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+@admin.register(AllEmployeesSalaryReportProxy)
+class AllEmployeesSalaryReportProxyAdmin(admin.ModelAdmin):
+    def changelist_view(self, request, extra_context=None):
+        required_permission = 'reports.view_all_employee_salaries' 
+        if not request.user.is_superuser and not request.user.has_perm(required_permission):
+            # Вместо PermissionDenied можно просто не показывать ссылку, если has_module_permission отработает
+            messages.error(request, "У тебя нет прав для просмотра этого отчета.")
+            return HttpResponseRedirect(request.META.get('HTTP_REFERER', reverse('admin:index')))
+
+        try:
+            report_url = reverse('reports:all_employees_salary_report') 
+        except Exception as e:
+            messages.error(request, f"Ошибка: URL для отчета 'Сводный отчет по зарплате' не настроен ({e}). Проверьте reports.urls.")
+            return HttpResponseRedirect(reverse('admin:index')) 
+        return HttpResponseRedirect(report_url)
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+
+    def has_module_permission(self, request):
+        if request.user.is_superuser: return True
+        return request.user.has_perm('reports.view_all_employee_salaries') 
+
+    def has_view_permission(self, request, obj=None):
+        if request.user.is_superuser: return True
+        return request.user.has_perm('reports.view_all_employee_salaries')

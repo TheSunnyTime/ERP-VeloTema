@@ -47,9 +47,9 @@ class CashRegister(models.Model):
         super().clean()
         if (self.is_default_for_cash or self.is_default_for_card) and self.till_type != self.TYPE_RETAIL_POINT:
             raise ValidationError({'till_type': "Кассой по умолчанию для приема платежей от заказов может быть только 'Касса торговой точки'."})
-        if self.till_type == self.TYPE_MAIN_ORGANIZATION:
-            if CashRegister.objects.filter(till_type=self.TYPE_MAIN_ORGANIZATION).exclude(pk=self.pk).exists():
-                raise ValidationError('Может существовать только одна "Главная касса организации".')
+        #if self.till_type == self.TYPE_MAIN_ORGANIZATION:
+        #    if CashRegister.objects.filter(till_type=self.TYPE_MAIN_ORGANIZATION).exclude(pk=self.pk).exists():
+        #        raise ValidationError('Может существовать только одна "Главная касса организации".')
         if self.is_default_for_cash and self.till_type == self.TYPE_RETAIL_POINT:
             if CashRegister.objects.filter(is_default_for_cash=True, till_type=self.TYPE_RETAIL_POINT).exclude(pk=self.pk).exists():
                 raise ValidationError({'is_default_for_cash': 'Уже существует другая касса торговой точки по умолчанию для наличных.'})
