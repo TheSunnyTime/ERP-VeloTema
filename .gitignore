@@ -20,6 +20,6 @@ local_settings.py
 .vscode/
 .idea/
 *.swp
-
+cd
 # Local settings
 **/local_settings.py 
