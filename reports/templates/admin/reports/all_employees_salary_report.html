@@ -1,28 +1,126 @@
 {% extends "admin/base_site.html" %}
-{% load i18n static %}
+{% load i18n static %} {# Загружаем i18n для {% translate %} и static для статики, если понадобится #}
 
 {% block extrastyle %}
     {{ block.super }}
+    <link rel="stylesheet" type="text/css" href="{% static 'admin/css/changelists.css' %}"> {# Стандартные стили для таблиц админки #}
     <style>
-        .report-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .report-table th, .report-table td { border: 1px solid var(--border-color, #ccc); padding: 6px 8px; text-align: left; font-size: 0.9em;}
-        .report-table th { background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); color: var(--table-header-fg, var(--header-fg, #333333)); font-weight: bold; }
-        .report-table td.amount, .report-table th.amount { text-align: right; }
-        .report-table tfoot td { font-weight: bold; background-color: var(--body-quiet-color, #f5f5f5); }
-         @media (prefers-color-scheme: dark) {
-            .report-table tfoot td { background-color: var(--dark-body-quiet-color, #333); }
+        /* Общие стили для страницы отчета */
+        .report-container {
+            width: 100%;
         }
 
-        .filter-form { margin-bottom: 20px; padding: 10px; background-color: var(--body-quiet-color, #f5f5f5); border-radius: 4px; }
-        .filter-form label { margin-right: 5px; margin-left:10px;}
-        .filter-form input[type="number"], .filter-form select { width: auto; min-width:80px; margin-right: 10px; padding: 5px; }
-        .filter-form input[type="submit"] { padding: 5px 10px;}
-         @media (prefers-color-scheme: dark) {
-            .filter-form { background-color: var(--dark-body-quiet-color, #333); }
+        .report-table { 
+            width: 100%; /* Таблица на всю ширину */
+            border-collapse: collapse; 
+            margin-bottom: 20px; 
         }
-        .period-navigation { margin-bottom: 20px; text-align: center; }
-        .period-navigation a, .period-navigation span { margin: 0 10px; font-size: 1.1em; }
-        .period-navigation .current-period { font-weight: bold; }
+        .report-table th, 
+        .report-table td { 
+            border: 1px solid var(--border-color); /* Используем переменную для цвета границ */
+            padding: 8px 10px; 
+            text-align: left; 
+            font-size: 0.9em;
+            color: var(--body-fg); /* Основной цвет текста, адаптируется к теме */
+        }
+        .report-table thead th { /* Заголовки таблицы */
+            background-color: var(--header-bg); /* Фон заголовков таблицы */
+            color: var(--header-fg); /* Цвет текста заголовков таблицы */
+            font-weight: bold; 
+            position: sticky; /* Для "липких" заголовков при прокрутке, если таблица большая */
+            top: 0;
+            z-index: 1;
+        }
+        .report-table tbody tr:nth-child(even) { /* Чередование строк для лучшей читаемости */
+            background-color: var(--module-bg-alt, var(--module-bg)); /* Фон для четных строк */
+        }
+        .report-table tbody tr:hover { /* Подсветка строки при наведении */
+            background-color: var(--changelist-row-hover-bg, var(--body-quiet-color));
+        }
+
+        .report-table td.amount, 
+        .report-table th.amount { /* Для числовых колонок - выравнивание по правому краю */
+            text-align: right; 
+        }
+        .report-table td.employee-name {
+            font-weight: normal; /* Обычный вес для имени сотрудника */
+        }
+
+        /* Стили для итоговой строки tfoot */
+        .report-table tfoot td { 
+            font-weight: bold; 
+            background-color: var(--module-bg); /* Фон для итоговой строки (адаптивный) */
+            color: var(--body-fg); /* Цвет текста для итоговой строки (адаптивный) */
+            border-top: 2px solid var(--hairline-color, var(--border-color)); /* Более жирная верхняя граница */
+        }
+
+        /* Стили для формы фильтра */
+        .filter-form { 
+            margin-bottom: 20px; 
+            padding: 15px; 
+            background-color: var(--module-bg); /* Адаптивный фон для блока фильтров */
+            border: 1px solid var(--border-color);
+            border-radius: 4px; 
+        }
+        .filter-form label { 
+            margin-right: 5px; 
+            margin-left:10px;
+            font-weight: bold;
+            color: var(--body-fg);
+        }
+        .filter-form input[type="number"], 
+        .filter-form select { 
+            /* width: auto;  Позволим Django админке управлять шириной по умолчанию */
+            min-width:100px; /* Минимальная ширина для удобства */
+            margin-right: 15px; 
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            background-color: var(--body-bg);
+            color: var(--body-fg);
+            border-radius: 3px;
+        }
+        .filter-form input[type="submit"] { 
+            padding: 7px 15px;
+            /* Стили кнопки будут наследоваться от стандартных стилей админки для submit */
+        }
+        .filter-form p { /* Если будут абзацы в форме фильтров */
+             margin-bottom: 10px;
+        }
+
+        /* Стили для навигации по периодам */
+        .period-navigation { 
+            margin-bottom: 20px; 
+            text-align: center; 
+        }
+        .period-navigation a, 
+        .period-navigation span { 
+            margin: 0 15px; 
+            font-size: 1.1em; 
+            padding: 5px 10px;
+            text-decoration: none;
+        }
+        .period-navigation a {
+            color: var(--link-fg);
+            border-bottom: 1px solid transparent;
+        }
+        .period-navigation a:hover {
+            border-bottom-color: var(--link-hover-color, var(--link-fg));
+        }
+        .period-navigation .current-period { 
+            font-weight: bold; 
+            color: var(--body-fg);
+        }
+        .period-navigation .disabled-link { /* Если ссылка неактивна */
+            color: var(--text-disabled-color, var(--body-quiet-color));
+            pointer-events: none; /* Чтобы нельзя было нажать */
+            cursor: default;
+        }
+
+        /* Детализация по заказам/выплатам (если будет) */
+        .details-link { font-size: 0.85em; }
+        .details-table { margin-left: 20px; margin-top: 5px; margin-bottom:10px; width: calc(100% - 20px); }
+        .details-table th, .details-table td { font-size: 0.95em; padding: 4px 6px; }
+
     </style>
 {% endblock %}
 
@@ -31,7 +129,12 @@
 {% block breadcrumbs %}
     <div class="breadcrumbs">
         <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
-        <a href="{% url 'admin:app_list' app_label=app_label %}">{{ opts.app_config.verbose_name|capfirst }}</a> &rsaquo;
+        {# Если 'app_label' передается из view, и это правильный app_label для SalaryManagement #}
+        {% if app_label %} 
+            <a href="{% url 'admin:app_list' app_label=app_label %}">
+                {% firstof opts.app_config.verbose_name app_label|capfirst %}
+            </a> &rsaquo;
+        {% endif %}
         {{ title }}
     </div>
 {% endblock %}
@@ -39,7 +142,7 @@
 {% block content_title %}<h1>{{ title }}</h1>{% endblock %}
 
 {% block content %}
-<div id="content-main">
+<div id="content-main" class="report-container">
     {% if messages %}
         <ul class="messagelist">{% for message in messages %}<li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message|capfirst }}</li>{% endfor %}</ul>
     {% endif %}
@@ -47,15 +150,17 @@
     <div class="filter-form">
         <form method="get" action="{% url 'reports:all_employees_salary_report' %}">
             <label for="id_month">Месяц:</label>
-            <input type="number" name="month" id="id_month" value="{{ selected_month }}" min="1" max="12">
+            <input type="number" name="month" id="id_month" value="{{ selected_month }}" min="1" max="12" required>
+            
             <label for="id_year">Год:</label>
-            <input type="number" name="year" id="id_year" value="{{ selected_year }}" min="2020" max="2099">
+            <input type="number" name="year" id="id_year" value="{{ selected_year }}" min="2020" max="2099" required>
+            
             <label for="id_employee">Сотрудник:</label>
             <select name="employee_id" id="id_employee">
                 <option value="">Все сотрудники</option>
                 {% for emp in all_employees %}
                     <option value="{{ emp.id }}" {% if emp.id == selected_employee_id %}selected{% endif %}>
-                        {{ emp.first_name|default:emp.username }}
+                        {{ emp.first_name|default:emp.username }} {% if emp.last_name %}{{ emp.last_name }}{% endif %}
                     </option>
                 {% endfor %}
             </select>
@@ -64,12 +169,18 @@
     </div>
 
     <div class="period-navigation">
-        <a href="{{ prev_month_url }}">&laquo; Предыдущий месяц</a>
+        {% if prev_month_url %}
+            <a href="{{ prev_month_url }}">&laquo; Предыдущий месяц</a>
+        {% else %}
+            <span class="disabled-link">&laquo; Предыдущий месяц</span>
+        {% endif %}
+        
         <span class="current-period">{{ selected_month|stringformat:"02d" }}.{{ selected_year }}</span>
+        
         {% if next_month_url %}
             <a href="{{ next_month_url }}">Следующий месяц &raquo;</a>
         {% else %}
-            <span>Следующий месяц &raquo;</span>
+            <span class="disabled-link">Следующий месяц &raquo;</span>
         {% endif %}
     </div>
 
@@ -78,40 +189,61 @@
             <thead>
                 <tr>
                     <th>Сотрудник</th>
-                    <th class="amount">Входящий остаток</th>
-                    <th class="amount">Начислено за период</th>
-                    <th class="amount">Выплачено за период</th>
-                    <th class="amount">Исходящий остаток</th>
-                    <th>Действия</th>
+                    <th class="amount">Входящий остаток, руб.</th>
+                    <th class="amount">Начислено за период, руб.</th>
+                    <th class="amount">Выплачено за период, руб.</th>
+                    <th class="amount">Исходящий остаток, руб.</th>
+                    <th>Детализация по заказам</th>
                 </tr>
             </thead>
             <tbody>
                 {% for data_row in report_data %}
                     <tr>
-                        <td>{{ data_row.employee_name }}</td>
+                        <td class="employee-name">{{ data_row.employee_name }}</td>
                         <td class="amount">{{ data_row.opening_balance|floatformat:2 }}</td>
                         <td class="amount">{{ data_row.accrued_period|floatformat:2 }}</td>
                         <td class="amount">{{ data_row.paid_period|floatformat:2 }}</td>
                         <td class="amount"><strong>{{ data_row.closing_balance|floatformat:2 }}</strong></td>
                         <td>
-                            <a href="{% url 'utils:my_salary_report' %}?year={{ selected_year }}&month={{ selected_month }}&employee_id_for_user_report={{ data_row.employee_id }}">
-                                Детали
-                            </a>
-                            {# Примечание: ссылка на my_salary_report должна быть доработана, чтобы принимать employee_id #}
-                            {# и если report_user != request.user, то проверять право view_all_employee_salaries #}
-                            {# Пока что, ссылка будет вести на отчет текущего залогиненного пользователя #}
+                            {% if data_row.calculations_for_period.exists %}
+                                <details class="details-link">
+                                    <summary>Показать начисления ({{ data_row.calculations_for_period.count }})</summary>
+                                    <table class="details-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Заказ ID</th>
+                                                <th>Тип/Контекст</th>
+                                                <th>Сумма</th>
+                                                <th>Правило</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        {% for calc in data_row.calculations_for_period %}
+                                            <tr>
+                                                <td><a href="{% url 'admin:orders_order_change' calc.order.id %}" target="_blank">#{{ calc.order.id }}</a></td>
+                                                <td>{{ calc.get_role_context_display }}</td>
+                                                <td class="amount">{{ calc.total_calculated_amount|floatformat:2 }}</td>
+                                                <td><small>{{ calc.applied_base_rule_info }}</small></td>
+                                            </tr>
+                                        {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </details>
+                            {% else %}
+                                <span style="color: var(--text-disabled-color);">Нет начислений</span>
+                            {% endif %}
                         </td>
                     </tr>
                 {% endfor %}
             </tbody>
             <tfoot>
                 <tr>
-                    <td><strong>ИТОГО по всем:</strong></td>
+                    <td><strong>ИТОГО по всем отображенным:</strong></td>
                     <td class="amount"><strong>{{ grand_total_opening_balance|floatformat:2 }}</strong></td>
                     <td class="amount"><strong>{{ grand_total_accrued_for_period|floatformat:2 }}</strong></td>
                     <td class="amount"><strong>{{ grand_total_paid_for_period|floatformat:2 }}</strong></td>
                     <td class="amount"><strong>{{ grand_total_closing_balance|floatformat:2 }}</strong></td>
-                    <td></td>
+                    <td></td> {# Пустая ячейка для действий #}
                 </tr>
             </tfoot>
         </table>

@@ -1,0 +1,72 @@
+{% extends "admin/base_site.html" %}
+{% load static %} {# <--- {% load static %} должен быть здесь, ПОСЛЕ extends и ПЕРЕД блоками #}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" type="text/css" href="{% static 'admin/css/changelists.css' %}">
+    <style>
+        /* Дополнительные стили для этой страницы, если нужны */
+        .export-button-container {
+            margin-bottom: 20px;
+        }
+        .results table th, .results table td {
+            white-space: nowrap; /* Чтобы длинные наименования не переносились сильно */
+        }
+    </style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Главная</a> &rsaquo; 
+    {# Если у тебя есть app_list для utils в админке, можно сделать ссылку #}
+    {# <a href="{% url 'admin:app_list' app_label='utils' %}">Утилиты</a> &rsaquo; #}
+    Утилиты &rsaquo; {# Простая текстовая ссылка, если нет app_list #}
+    {{ title }}
+</div>
+{% endblock %}
+
+{% block content_title %}<h1>{{ title }}</h1>{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <p>Эта страница позволяет выгрузить текущие общие остатки товаров и их основную себестоимость из карточки товара.</p>
+    <p>Эти данные можно использовать для создания "технической" поставки для ввода начальных остатков в систему партионного учета FIFO.</p>
+    
+    <div class="export-button-container">
+        <a href="?download_csv=true" class="button">Скачать CSV файл</a>
+    </div>
+
+    {% if products_data %}
+    <div class="module" id="changelist"> {# Используем классы админки для похожего вида #}
+        <div class="results">
+            <table id="result_list">
+                <thead>
+                    <tr>
+                        <th>ID Товара</th>
+                        <th>Наименование товара</th>
+                        <th>Текущий общий остаток</th>
+                        <th>Текущая себестоимость (из карточки)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for product in products_data %}
+                    <tr class="{% cycle 'row1' 'row2' %}">
+                        <td>{{ product.pk }}</td>
+                        <td>{{ product.name }}</td>
+                        <td>{{ product.stock_quantity }}</td>
+                        <td>{{ product.cost_price|default_if_none:"N/A"|floatformat:2 }}</td> {# Используем product.cost_price #}
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4">Нет товаров для отображения.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <p>Нет данных о товарах для выгрузки.</p>
+    {% endif %}
+</div>
+{% endblock %}

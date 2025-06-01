@@ -2,6 +2,7 @@
 # ... (импорты оставляем как есть) ...
 from django.shortcuts import render, get_object_or_404
 from django.http import HttpResponse, HttpResponseRedirect, HttpResponseServerError, JsonResponse
+from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import reverse
 from django.contrib import admin, messages
 from django.contrib.auth.decorators import login_required
@@ -12,6 +13,7 @@ import re
 from django.utils import timezone 
 from django.contrib.auth import get_user_model
 from django.db.models import Sum
+
 
 from products.models import Product
 from orders.models import Order, OrderType, OrderServiceItem, OrderProductItem
@@ -28,6 +30,7 @@ from datetime import date, timedelta
 
 import csv
 from decimal import Decimal, InvalidOperation
+
 
 User = get_user_model()
 
@@ -304,3 +307,35 @@ def get_employee_balance_api(request, employee_id):
     current_balance = total_accrued - total_paid
     data = {'employee_id': employee_obj.id, 'employee_name': employee_obj.first_name if employee_obj.first_name else employee_obj.username, 'current_balance': f"{current_balance:.2f}", 'total_accrued': f"{total_accrued:.2f}", 'total_paid': f"{total_paid:.2f}"}
     return JsonResponse(data)
+
+@staff_member_required # Доступ только для персонала (сотрудников с доступом в админку)
+def export_stock_levels_view(request):
+    products_data = Product.objects.all().order_by('name')
+    
+    context = {
+        'title': 'Выгрузка текущих остатков и себестоимостей',
+        'products_data': products_data,
+        'site_header': "Администрирование CRM ВелоТема", # Или твой кастомный заголовок
+        'has_permission': request.user.is_active and request.user.is_staff, # Для шаблона админки
+    }
+
+    if 'download_csv' in request.GET:
+        response = HttpResponse(content_type='text/csv; charset=utf-8') # Указываем charset=utf-8
+        response['Content-Disposition'] = 'attachment; filename="current_stock_levels.csv"'
+        
+        # Добавляем BOM для корректного отображения кириллицы в Excel
+        response.write(u'\ufeff'.encode('utf8'))
+
+        writer = csv.writer(response, delimiter=';') # Используем точку с запятой как разделитель
+        writer.writerow(['ID Товара', 'Наименование товара', 'Текущий общий остаток', 'Текущая себестоимость (из карточки)'])
+        
+        for product in products_data:
+            writer.writerow([
+                product.pk,
+                product.name,
+                product.stock_quantity,
+                product.cost_price # Используем product.cost_price
+            ])
+        return response
+
+    return render(request, 'utils/export_stock_levels.html', context)

@@ -1,4 +1,5 @@
 from django.db import models
+from decimal import Decimal
 
 # Create your models here.
 # CRM 2.0/ERP/products/models.py
@@ -62,6 +63,8 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name
+    
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата последнего обновления")
 
     # --- НОВЫЕ СВОЙСТВА ДЛЯ РАСЧЕТА СУММ ---
     @property

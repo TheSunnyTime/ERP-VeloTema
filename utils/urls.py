@@ -1,5 +1,5 @@
 # F:\CRM 2.0\ERP\utils\urls.py
-from django.urls import path
+from django.urls import path, include
 from django.contrib import admin # Для admin.site.admin_view
 from . import views # Импортируем views из текущего приложения utils
 
@@ -31,5 +31,6 @@ urlpatterns = [
         views.get_employee_balance_api, # Не оборачиваем в admin_view, т.к. это API
         name='api_get_employee_balance'
     ),
+     path('export-stock-levels/', views.export_stock_levels_view, name='export_stock_levels'),
     # ---------------------------------------------
 ]

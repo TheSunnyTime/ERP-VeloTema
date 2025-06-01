@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'suppliers.apps.SuppliersConfig',
     'django.contrib.staticfiles',
 
     # Ваши приложения
