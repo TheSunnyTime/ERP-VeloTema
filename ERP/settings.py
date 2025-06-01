@@ -1,29 +1,29 @@
-# CRM 2.0/ERP/ERP/settings.py
+# ERP/settings.py (или F:\CRM 2.0\ERP\ERP\settings.py)
 
 from pathlib import Path
-import os # Часто используется для BASE_DIR в старых версиях, но с Path можно и без него
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent # Это должно указывать на папку CRM 2.0/ERP/
-
-# QUICK-START DEVELOPMENT SETTINGS
-# See https://docs.djangoproject.com/en/stable/howto/deployment/checklist/
+BASE_DIR = Path(__file__).resolve().parent.parent # Это должно указывать на папку F:\CRM 2.0\erp\ (или F:\CRM 2.0\erp_live\)
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# ЗАМЕНИТЕ ЭТО НА ВАШ УНИКАЛЬНЫЙ КЛЮЧ ИЗ ВАШЕГО settings.py
-SECRET_KEY = 'fasasf'
+# Этот ключ будет использоваться по умолчанию.
+# Для "рабочей" среды (erp_live) ОБЯЗАТЕЛЬНО переопредели его на новый и сложный
+# в файле erp_live/ERP/local_settings.py
+SECRET_KEY = 'fasasf' # ЗАМЕНИ ЭТО НА СВОЙ СЛОЖНЫЙ КЛЮЧ ДЛЯ РАЗРАБОТКИ, ЕСЛИ ХОЧЕШЬ
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True # Для разработки True, для "боевого" сайта False
+# По умолчанию DEBUG = False (более безопасно).
+# В erp/ERP/local_settings.py для разработки мы установим DEBUG = True.
+# В erp_live/ERP/local_settings.py DEBUG должен остаться False или быть явно установлен в False.
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = [
-    '95.47.60.56',  # Ваш статический IP
-    '127.0.0.1',
-    'localhost',
-]
+# ALLOWED_HOSTS по умолчанию. Будет переопределено в local_settings.py для каждой среды.
+# Если DJANGO_ALLOWED_HOSTS не установлена, разрешает только стандартные хосты для разработки.
+ALLOWED_HOSTS_STRING = os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost')
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
+
 
 # Application definition
-# F:\CRM 2.0\ERP\ERP\settings.py
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -37,10 +37,9 @@ INSTALLED_APPS = [
     'orders.apps.OrdersConfig',
     'clients.apps.ClientsConfig',
     'reports.apps.ReportsConfig',
-    'cash_register.apps.CashRegisterConfig', # <--- Убедитесь, что эта строка АКТИВНА и правильна
-    'utils.apps.UtilsConfig',     # <-- Наше новое приложение
+    'cash_register.apps.CashRegisterConfig',
+    'utils.apps.UtilsConfig', 
     'salary_management.apps.SalaryManagementConfig'
-
 ]
 
 MIDDLEWARE = [
@@ -53,13 +52,14 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'ERP.urls' # Указывает на главный файл urls.py вашего проекта (CRM 2.0/ERP/ERP/urls.py)
+ROOT_URLCONF = 'ERP.urls' # Убедись, что имя проекта ERP совпадает с именем папки с settings.py
 
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'], # <--- ИЗМЕНИТЕ ЭТУ СТРОКУ
-        'APP_DIRS': True,
+        # Путь к общим шаблонам на уровне проекта (например, templates/admin/base_site.html)
+        'DIRS': [BASE_DIR / 'templates'], 
+        'APP_DIRS': True, # Искать шаблоны также в папках templates внутри приложений
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.debug',
@@ -71,19 +71,18 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'ERP.wsgi.application' # Для WSGI серверов
+WSGI_APPLICATION = 'ERP.wsgi.application'
+
 
 # Database
-# https://docs.djangoproject.com/en/stable/ref/settings/#databases
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3', # Файл базы данных будет в папке CRM 2.0/ERP/
+        'NAME': BASE_DIR / 'db.sqlite3', # Файл db.sqlite3 будет в корне текущей копии проекта
     }
 }
 
 # Password validation
-# https://docs.djangoproject.com/en/stable/ref/settings/#auth-password-validators
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -100,21 +99,43 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-# https://docs.djangoproject.com/en/stable/topics/i18n/
-LANGUAGE_CODE = 'ru-ru' # Мы это меняли на русский
+LANGUAGE_CODE = 'ru-ru'
+TIME_ZONE = 'Europe/Moscow' # Убедись, что это твой актуальный часовой пояс
+USE_I18N = True
+USE_TZ = True
 
-TIME_ZONE = 'Europe/Moscow' # Мы это меняли, выберите ваш часовой пояс
-
-USE_I18N = True # Для поддержки интернационализации (переводов)
-
-USE_TZ = True # Для поддержки часовых поясов
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/stable/howto/static-files/
 STATIC_URL = 'static/'
-# STATIC_ROOT = BASE_DIR / 'staticfiles' # Для команды collectstatic при развертывании
-# STATICFILES_DIRS = [ BASE_DIR / "static", ] # Если есть общие статические файлы на уровне проекта
+
+# STATICFILES_DIRS - для статики, не привязанной к конкретному приложению, 
+# а лежащей в общей папке static на уровне проекта (рядом с manage.py)
+STATICFILES_DIRS = [
+    BASE_DIR / "static", 
+]
+
+# STATIC_ROOT - папка, куда будет собираться вся статика командой collectstatic
+# Обычно используется только для DEBUG = False.
+# Ее можно определить здесь или переопределить в local_settings.py для "рабочей" среды.
+# Пример: STATIC_ROOT = BASE_DIR / 'staticfiles_collected'
+
+# MEDIA_URL и MEDIA_ROOT - для файлов, загружаемых пользователями (если они есть)
+# MEDIA_URL = '/media/'
+# MEDIA_ROOT = BASE_DIR / 'media'
+
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/stable/ref/settings/#default-auto-field
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# --- ИМПОРТ ЛОКАЛЬНЫХ НАСТРОЕК ---
+# Этот блок должен быть в САМОМ КОНЦЕ файла
+try:
+    from .local_settings import *
+    # Для отладки при первом запуске можно добавить:
+    # print(f"[{BASE_DIR}] Successfully imported local_settings.py")
+except ImportError:
+    # Для отладки при первом запуске можно добавить:
+    # print(f"[{BASE_DIR}] local_settings.py not found or could not be imported. Using default settings from main settings.py.")
+    pass
+# --- КОНЕЦ БЛОКА ИМПОРТА ---
