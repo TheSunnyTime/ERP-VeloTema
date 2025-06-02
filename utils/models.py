@@ -85,6 +85,21 @@ class DocumentTemplate(models.Model):
     def __str__(self):
         return f"{self.name} ({self.document_type.name})"
 
+class ExportStockLevelsTool(models.Model):
+    class Meta:
+        # verbose_name и verbose_name_plural будут отображаться в админке
+        verbose_name = "Инструмент: Выгрузка остатков" 
+        verbose_name_plural = "Инструменты: Выгрузка остатков"
+        app_label = 'utils'  # Указываем, к какому приложению относится модель
+        managed = False      # ВАЖНО: Django не будет управлять таблицей этой модели в БД
+                             # (т.е. не будет создавать, изменять, удалять ее)
 # --- Модели для Зарплаты УДАЛЕНЫ ОТСЮДА ---
 # EmployeeRate, SalaryCalculation, SalaryCalculationDetail, SalaryPayment
 # теперь будут в salary_management/models.py
+
+class ImportSupplyItemsTool(models.Model): # Наша новая модель для ссылки
+    class Meta:
+        verbose_name = "Инструмент: Импорт позиций Поставки (CSV)" 
+        verbose_name_plural = "Инструменты: Импорт позиций Поставки (CSV)"
+        app_label = 'utils'  # Привязываем к приложению utils
+        managed = False      # Таблица в БД создаваться не будет

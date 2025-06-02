@@ -1,42 +1,42 @@
 # F:\CRM 2.0\ERP\utils\admin.py
-from django.contrib import admin
-from django.urls import reverse # Убрал 'path', так как он здесь не используется напрямую
+from django.contrib import admin, messages
+from django.urls import path, reverse 
 from django.http import HttpResponseRedirect
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied # Не используется напрямую в этом файле, но может быть полезно
 from django.utils.html import format_html
-from django.contrib.auth.models import Group # Используется в DocumentTemplateAdmin
-from django.contrib import messages # Используется в ProductPriceImporterAdmin
 
 # Модели из .models текущего приложения (utils)
 from .models import (
-    ProductPriceImporter, DocumentType, DocumentTemplate
-    # УБРАНЫ: EmployeeRate, SalaryCalculation, SalaryPayment, SalaryCalculationDetail
-    # Это правильно, так как они теперь в salary_management/admin.py
+    ProductPriceImporter, 
+    DocumentType, 
+    DocumentTemplate, 
+    ExportStockLevelsTool,
+    ImportSupplyItemsTool # Наша новая модель для ссылки
 )
 # View из .views текущего приложения (utils)
-from .views import product_csv_import_view 
+from .views import product_csv_import_view, export_stock_levels_view # Импортируем обе view
 
 @admin.register(ProductPriceImporter)
 class ProductPriceImporterAdmin(admin.ModelAdmin):
     def changelist_view(self, request, extra_context=None):
-        if not request.user.has_perm('utils.can_import_product_prices'):
+        # Убедись, что право 'utils.can_import_product_prices' определено в Meta ProductPriceImporter, если используется
+        if not request.user.has_perm('utils.can_import_product_prices') and not request.user.is_superuser:
             messages.error(request, "У тебя нет прав для импорта прайс-листов.")
             return HttpResponseRedirect(reverse('admin:index'))
-            
-        import_url = reverse('utils:import_product_csv')
+        try:
+            import_url = reverse('utils:import_product_csv') # Предполагаем, что такой URL есть в utils.urls
+        except Exception as e:
+            messages.error(request, f"Ошибка: URL 'utils:import_product_csv' для импорта прайс-листа не настроен ({e}).")
+            return HttpResponseRedirect(reverse('admin:index'))
         return HttpResponseRedirect(import_url)
 
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
     def has_delete_permission(self, request, obj=None): return False
     
-    def has_view_permission(self, request, obj=None): # Право на "просмотр" самой прокси-модели (ссылки)
-        return request.user.has_perm('utils.can_import_product_prices') or request.user.is_superuser
-
-    def has_module_permission(self, request): # Определяет, будет ли модель видна в списке моделей приложения
-        # Для прокси-модели, которая является ссылкой на действие, логично,
-        # чтобы она была видна, если пользователь имеет право на это действие.
-        return request.user.has_perm('utils.can_import_product_prices') or request.user.is_superuser
+    def has_module_permission(self, request):
+        if request.user.is_superuser: return True
+        return request.user.has_perm('utils.can_import_product_prices')
 
 @admin.register(DocumentType)
 class DocumentTypeAdmin(admin.ModelAdmin):
@@ -60,8 +60,6 @@ class DocumentTypeAdmin(admin.ModelAdmin):
     display_placeholders_hint_summary.short_description = "Подсказка по плейсхолдерам (начало)"
     
     def has_module_permission(self, request):
-        # Стандартный и рекомендуемый подход для большинства моделей:
-        # Модель видна в приложении, если у пользователя есть хотя бы одно из стандартных CRUD прав.
         return request.user.has_perm('utils.view_documenttype') or \
                request.user.has_perm('utils.add_documenttype') or \
                request.user.has_perm('utils.change_documenttype') or \
@@ -85,40 +83,74 @@ class DocumentTemplateAdmin(admin.ModelAdmin):
         if obj and obj.document_type:
             doc_type = obj.document_type
         
-        # Твой предыдущий закомментированный код для _current_document_type_for_hint я убрал,
-        # так как он не был полностью реализован и мог вызывать вопросы.
-        # Подсказка будет корректно отображаться при редактировании существующего шаблона.
-        # Для новых шаблонов она появится после первого сохранения с выбранным типом документа.
-
         if doc_type and doc_type.placeholders_hint:
             content = format_html("<p style='margin-top:0;'><strong>Подсказка по плейсхолдерам для типа '{}':</strong></p>", doc_type.name)
             content += format_html("<pre style='white-space: pre-wrap; background-color: var(--body-quiet-color, #f7f7f7); border: 1px solid var(--border-color, #ccc); padding: 10px; border-radius: 4px; color: var(--body-fg);'>{}</pre>", doc_type.placeholders_hint)
             return content
         elif doc_type:
-             return "Для выбранного типа документа ('{}') подсказка по плейсхолдерам не заполнена.".format(doc_type.name)
-        return "Выберите 'Тип документа', чтобы увидеть подсказку по плейсхолдерам (подсказка появится после сохранения или при редактировании существующего шаблона)."
+            return "Для выбранного типа документа ('{}') подсказка по плейсхолдерам не заполнена.".format(doc_type.name)
+        return "Выберите 'Тип документа', чтобы увидеть подсказку по плейсхолдерам (появится после сохранения или при редактировании)."
     display_placeholders_hint_on_form.short_description = "Доступные плейсхолдеры"
 
     def has_change_permission(self, request, obj=None):
         if not obj: 
-            # Разрешаем доступ к форме добавления, если есть право на добавление
             return request.user.has_perm('utils.add_documenttemplate') or request.user.is_superuser
         if request.user.is_superuser:
             return True
-        # Если группы заданы, проверяем членство пользователя в них И общее право на изменение
         if obj.allowed_editing_groups.exists():
             user_in_allowed_group = obj.allowed_editing_groups.filter(pk__in=request.user.groups.all()).exists()
             return user_in_allowed_group and request.user.has_perm('utils.change_documenttemplate')
-        # Если группы не заданы, то право на изменение определяется общим пермишеном 'utils.change_documenttemplate'
         return request.user.has_perm('utils.change_documenttemplate')
 
     def has_module_permission(self, request):
-        # Аналогично DocumentTypeAdmin
         return request.user.has_perm('utils.view_documenttemplate') or \
                request.user.has_perm('utils.add_documenttemplate') or \
                request.user.has_perm('utils.change_documenttemplate') or \
                request.user.has_perm('utils.delete_documenttemplate') or \
                request.user.is_superuser
 
-# --- Админ-классы для моделей Зарплаты здесь больше НЕ НУЖНЫ ---
-# Они должны быть в salary_management/admin.py
+@admin.register(ExportStockLevelsTool)
+class ExportStockLevelsToolAdmin(admin.ModelAdmin):
+    def get_urls(self):
+        urls = [] 
+        custom_urls = [
+            path('', self.admin_site.admin_view(export_stock_levels_view), name='utils_exportstocklevelstool_changelist'),
+        ]
+        return custom_urls + urls # Объединяем, хотя urls пуст
+
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+    def has_module_permission(self, request):
+        if request.user.is_staff: return True # Доступ для всех сотрудников
+        return False
+
+# --- ИСПРАВЛЕННЫЙ АДМИН-КЛАСС ДЛЯ ИНСТРУМЕНТА ИМПОРТА ПОЗИЦИЙ ПОСТАВКИ ---
+@admin.register(ImportSupplyItemsTool) # <--- РАСКОММЕНТИРОВАЛ ДЕКОРАТОР
+class ImportSupplyItemsToolAdmin(admin.ModelAdmin):
+    def changelist_view(self, request, extra_context=None):
+        # Перенаправляем пользователя на страницу импорта CSV для позиций поставки
+        try:
+            # Убедись, что в suppliers/urls.py есть app_name = 'suppliers'
+            # и путь с name='import_supply_items_csv'
+            import_url = reverse('suppliers:import_supply_items_csv')
+            return HttpResponseRedirect(import_url)
+        except Exception as e:
+            self.message_user(request, f"Ошибка: URL для импорта позиций поставки ('suppliers:import_supply_items_csv') не настроен или не найден ({e}). Проверьте urls.py приложений suppliers и utils.", level=messages.ERROR)
+            # Редирект на список моделей приложения utils, если что-то пошло не так с URL импорта
+            return HttpResponseRedirect(reverse('admin:app_list', kwargs={'app_label': 'utils'}))
+
+    # Запрещаем стандартные действия
+    def has_add_permission(self, request):
+        return False
+    def has_change_permission(self, request, obj=None):
+        return False
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    # Контролируем, кто видит этот пункт меню в разделе "Утилиты"
+    def has_module_permission(self, request):
+        # Разрешаем, например, только staff users или тем, у кого есть специфическое право
+        if request.user.is_staff: 
+            return True
+        return False

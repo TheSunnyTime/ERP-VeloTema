@@ -23,6 +23,10 @@ ALLOWED_HOSTS_STRING = os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localho
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
 
 
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 20000 # Или другое значение, больше 1000
+                                     # Подбери значение, достаточное для твоих нужд,
+                                     # но не слишком большое без необходимости.
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',

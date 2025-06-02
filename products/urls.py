@@ -6,7 +6,7 @@ app_name = 'products' # <--- ОЧЕНЬ ВАЖНО: имя приложения 
 
 urlpatterns = [
     # Этот URL мы создавали для динамического получения цены товара
-    path('get-price/<int:product_id>/', views.get_product_price, name='get_product_price'),
+    path('get-price/<int:product_id>/', views.get_product_price_api_view, name='get_product_price_api'),
     # Здесь НЕ должно быть строки path('products-api/', include('products.urls', ...))
     # Сюда можно добавлять другие URL, специфичные для приложения products, если они понадобятся
 ]
