@@ -43,7 +43,7 @@ class OrderAdmin(admin.ModelAdmin):
         'id', 'client__name', 'manager__username', 'manager__first_name', 
         'performer__username', 'performer__first_name', 'notes', 'order_type__name'
     )
-    autocomplete_fields = ['manager', 'performer', 'client', 'order_type'] # Раскомментировал, если они нужны
+    autocomplete_fields = ['manager', 'performer', 'client',] # Раскомментировал, если они нужны
     inlines = [OrderProductItemInline, OrderServiceItemInline]
     change_form_template = 'admin/orders/order/change_form_with_documents.html'
 
