@@ -1,10 +1,10 @@
 // F:\CRM 2.0\ERP\orders\static\orders\js\order_form_price_updater.js
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('[DOM] ContentLoaded: Initializing order form updater and type determiner.');
+    // console.log('[DOM] ContentLoaded: Initializing order form updater and type determiner.');
 
     if (typeof django !== 'undefined' && typeof django.jQuery !== 'undefined') {
         const $ = django.jQuery;
-        console.log('[jQuery] Found. Initializing dynamic updates.');
+        // console.log('[jQuery] Found. Initializing dynamic updates.');
 
         function parseFloatSafely(value) {
             if (typeof value === 'string') {
@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function updateOrderTotal() {
             let overallTotal = 0;
-            $('#product_items-group .dynamic-product_items.form-row:not(.empty-form)').each(function() {
+            $('#product_items-group .dynamic-product_items.form-row:not(.empty-form), #product_items-group tr.dynamic-product_items:not(.empty-form)').each(function() {
                 const $row = $(this);
                 const $productSelect = $row.find('select[name$="-product"]');
                 if ($productSelect.length && $productSelect.val()) {
@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             });
-            $('#service_items-group .dynamic-service_items.form-row:not(.empty-form)').each(function() {
+            $('#service_items-group .dynamic-service_items.form-row:not(.empty-form), #service_items-group tr.dynamic-service_items:not(.empty-form)').each(function() {
                 const $row = $(this);
                 const $serviceSelect = $row.find('select[name$="-service"]');
                 if ($serviceSelect.length && $serviceSelect.val()) {
@@ -50,12 +50,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             const $quantityInput = $row.find('input[name$="-quantity"]');
-            const $priceInput = $row.find('input[name$="-price_at_order"]'); // Цена продажи
+            const $priceInput = $row.find('input[name$="-price_at_order"]');
             const $itemTotalDisplayElement = $row.find('td.field-display_item_total p, div.field-display_item_total div.readonly');
 
             if ($quantityInput.length && $priceInput.length && $itemTotalDisplayElement.length) {
                 const quantity = parseInt($quantityInput.val(), 10);
-                const price = parseFloatSafely($priceInput.val()); // Цена продажи
+                const price = parseFloatSafely($priceInput.val());
 
                 if (!isNaN(quantity) && quantity >= 0 && !isNaN(price)) {
                     const itemTotal = quantity * price;
@@ -72,50 +72,73 @@ document.addEventListener('DOMContentLoaded', function() {
         function fetchAndUpdatePriceAndStock(selectElement, priceFieldIdentifierInModel, apiUrlPrefix, priceJsonKey, stockJsonKey, costPriceJsonKey = 'cost_price', stockDisplaySuffix = " шт.") {
             const $selectElement = $(selectElement);
             const selectedId = $selectElement.val();
-            // Более надежный поиск строки, который работает и для product_items и для service_items
             const $row = $selectElement.closest('tr[class*="dynamic-"], .form-row[class*="dynamic-"]');
 
-
             if (!$row.length || $row.hasClass('empty-form')) {
-                console.warn('[APIUpdater] Could not find parent row or row is empty for select element:', selectElement.name);
                 return;
             }
 
             const selectName = $selectElement.attr('name');
             if (!selectName) { return; } 
+            
             const nameParts = selectName.split('-');
             if (nameParts.length < 2) { return; }
 
-            const priceInputName = `${nameParts[0]}-${nameParts[1]}-${priceFieldIdentifierInModel}`;
-            const $priceInput = $row.find(`input[name="${priceInputName}"]`); // Цена продажи
+            const prefix = `${nameParts[0]}-${nameParts[1]}-`;
+            const priceInputName = `${prefix}${priceFieldIdentifierInModel}`;
+            const $priceInput = $row.find(`input[name="${priceInputName}"]`); // Поле <input> для цены
             
+            // Элемент для отображения readonly цены (обычно <p> или <div> внутри td.field-price_at_order)
+            const $priceReadonlyDisplay = $row.find(`td.field-${priceFieldIdentifierInModel} p, td.field-${priceFieldIdentifierInModel} div.readonly`);
+
+
             let $stockDisplayElement = $();
-            if (stockJsonKey) { // Только для товаров, у услуг stockJsonKey будет null
+            if (stockJsonKey) {
                 $stockDisplayElement = $row.find('td.field-get_current_stock p, div.field-get_current_stock div.readonly');
             }
-
-            // --- НОВОЕ: Поиск элемента для отображения базовой себестоимости ---
-            // Имя поля должно совпадать с тем, что ты определишь в OrderProductItemInline (readonly_fields)
-            // Например, 'display_product_base_cost_price'
             const $baseCostDisplayElement = $row.find('td.field-display_product_base_cost_price div.readonly, td.field-display_product_base_cost_price p');
-            // --- КОНЕЦ НОВОГО ---
             
             if (selectedId) {
                 const fetchUrl = `${apiUrlPrefix}${selectedId}/`;
-                console.log('[APIUpdater] Fetching from URL:', fetchUrl);
+                // console.log(`[APIUpdater] Fetching from URL: ${fetchUrl} for select ${selectName}`);
                 $.ajax({
                     url: fetchUrl,
                     type: 'GET',
                     success: function(data) {
-                        console.log('[APIUpdater] Data received:', data);
-                        if ($priceInput.length) { // Обновляем цену продажи
+                        // console.log(`[APIUpdater] Data received for ID ${selectedId} (URL: ${fetchUrl}):`, data);
+                        let priceUpdated = false;
+                        
+                        // Пытаемся обновить поле <input> для цены, если оно существует и редактируемо
+                        if ($priceInput.length && !$priceInput.is('[readonly]') && !$priceInput.is(':disabled')) {
+                            console.log(`[APIUpdater] Found EDITABLE price input field: ${$priceInput.attr('name')}`);
                             if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
-                                $priceInput.val(parseFloatSafely(data[priceJsonKey]).toFixed(2));
+                                const priceToSet = parseFloatSafely(data[priceJsonKey]).toFixed(2);
+                                $priceInput.val(priceToSet);
+                                console.log(`[APIUpdater] EDITABLE Price input field for ${selectName} UPDATED to: ${priceToSet}`);
+                                priceUpdated = true;
                             } else {
                                 $priceInput.val('0.00');
+                                console.log(`[APIUpdater] Price data for ${selectName} not found or null. EDITABLE Price input set to 0.00. priceJsonKey was: ${priceJsonKey}`);
                             }
+                        } 
+                        
+                        // Если input не был обновлен (например, его нет или он readonly), И есть элемент для readonly отображения
+                        if (!priceUpdated && $priceReadonlyDisplay.length) {
+                            console.log(`[APIUpdater] Price input NOT found or readonly. Found readonly display for ${priceFieldIdentifierInModel}.`);
+                            if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
+                                const priceToSet = parseFloatSafely(data[priceJsonKey]).toFixed(2).replace('.', ',');
+                                $priceReadonlyDisplay.text(priceToSet);
+                                console.log(`[APIUpdater] READONLY Price display for ${selectName} UPDATED to: ${priceToSet}`);
+                            } else {
+                                $priceReadonlyDisplay.text('-');
+                                console.log(`[APIUpdater] Price data for ${selectName} not found or null. READONLY Price display set to "-".`);
+                            }
+                        } else if (!priceUpdated && !$priceInput.length) { // Если не нашли ни input, ни readonly display
+                            console.warn(`[APIUpdater] Price input field for ${selectName} (name: ${priceInputName}) AND its readonly display NOT found in row.`);
                         }
-                        if (stockJsonKey && data && $stockDisplayElement.length) { // Обновляем остаток (только для товаров)
+
+
+                        if (stockJsonKey && $stockDisplayElement.length) { 
                             if (typeof data[stockJsonKey] !== 'undefined' && data[stockJsonKey] !== null) {
                                 let stock = parseInt(data[stockJsonKey], 10);
                                 $stockDisplayElement.text(isNaN(stock) ? 'N/A' : stock + stockDisplaySuffix);
@@ -123,39 +146,31 @@ document.addEventListener('DOMContentLoaded', function() {
                                 $stockDisplayElement.text('N/A');
                             }
                         }
-
-                        // --- НОВОЕ: Обновление отображения базовой себестоимости (Product.cost_price) ---
-                        if (costPriceJsonKey && $baseCostDisplayElement.length) { // costPriceJsonKey будет 'cost_price' для товаров
+                        if (costPriceJsonKey && $baseCostDisplayElement.length) {
                             if (data && typeof data[costPriceJsonKey] !== 'undefined' && data[costPriceJsonKey] !== null) {
                                 $baseCostDisplayElement.text(parseFloatSafely(data[costPriceJsonKey]).toFixed(2));
-                                console.log('[APIUpdater] Base cost price updated to:', data[costPriceJsonKey]);
                             } else {
                                 $baseCostDisplayElement.text('---');
-                                console.log('[APIUpdater] Base cost price data not found or null.');
                             }
-                        } else if (costPriceJsonKey) {
-                            console.warn('[APIUpdater] Base cost display element not found for class .field-display_product_base_cost_price');
                         }
-                        // --- КОНЕЦ НОВОГО ---
-
                         updateItemTotal($row);
                     },
                     error: function(xhr, status, error) {
-                        console.error('[APIUpdater] Error fetching data:', error, 'Status:', status, 'URL:', fetchUrl);
+                        console.error('[APIUpdater] Error fetching data for URL', fetchUrl, 'Error:', error, 'Status:', status);
                         if ($priceInput.length) $priceInput.val('0.00');
+                        else if ($priceReadonlyDisplay.length) $priceReadonlyDisplay.text('-'); // Очищаем и readonly, если была ошибка
+                        
                         if (stockJsonKey && $stockDisplayElement.length) $stockDisplayElement.text('Ошибка'); 
-                        // --- НОВОЕ: Очистка при ошибке ---
                         if (costPriceJsonKey && $baseCostDisplayElement.length) $baseCostDisplayElement.text('Ошибка');
-                        // --- КОНЕЦ НОВОГО ---
                         updateItemTotal($row);
                     }
                 });
-            } else { // Если товар/услуга не выбраны (очищено поле)
+            } else { 
                 if ($priceInput.length) $priceInput.val('0.00');
+                else if ($priceReadonlyDisplay.length) $priceReadonlyDisplay.text('-'); // Очищаем и readonly
+                
                 if (stockJsonKey && $stockDisplayElement.length) $stockDisplayElement.text(''); 
-                // --- НОВОЕ: Очистка при сбросе выбора ---
                 if (costPriceJsonKey && $baseCostDisplayElement.length) $baseCostDisplayElement.text('---');
-                // --- КОНЕЦ НОВОГО ---
                 updateItemTotal($row);
             }
         }
@@ -169,12 +184,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (!$orderTypeSelect.length && !$orderTypeReadonlyDiv.length) {
-                console.warn('[OrderTypeAPI] Order type select field AND readonly display not found. Exiting.');
+                // console.warn('[OrderTypeAPI] Order type select field AND readonly display not found. Exiting.');
                 return;
             }
             
             let hasProducts = false;
-            $('#product_items-group tr.dynamic-product_items:not(.empty-form)').each(function() {
+            $('#product_items-group tr.dynamic-product_items:not(.empty-form), #product_items-group .dynamic-product_items.form-row:not(.empty-form)').each(function() {
                 const $productSelect = $(this).find('select[name$="-product"]');
                 if ($productSelect.length && $productSelect.val()) {
                     hasProducts = true;
@@ -183,14 +198,14 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             let hasServices = false;
-            $('#service_items-group tr.dynamic-service_items:not(.empty-form)').each(function() {
+            $('#service_items-group tr.dynamic-service_items:not(.empty-form), #service_items-group .dynamic-service_items.form-row:not(.empty-form)').each(function() {
                 const $serviceSelect = $(this).find('select[name$="-service"]');
                 if ($serviceSelect.length && $serviceSelect.val()) {
                     hasServices = true;
                     return false; 
                 }
             });
-
+            
             const apiUrl = '/orders-api/api/determine-order-type/'; 
 
             $.ajax({
@@ -201,9 +216,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     'has_services': hasServices
                 },
                 success: function(response) {
+                    // console.log('[OrderTypeAPI] Raw API Response:', response); 
                     if (response.order_type_id !== null && typeof response.order_type_name !== 'undefined') {
                         let successfullyUpdatedSelect = false;
-                        let typeUpdated = false;
+                        let typeActuallyChanged = false; 
 
                         if ($orderTypeSelect.length && !$orderTypeSelect.is('[readonly]') && !$orderTypeSelect.is(':disabled')) {
                             const $optionToSelect = $orderTypeSelect.find('option[value="' + response.order_type_id + '"]');
@@ -215,38 +231,36 @@ document.addEventListener('DOMContentLoaded', function() {
                                     } else {
                                         $orderTypeSelect.trigger('change'); 
                                     }
-                                    console.log('[OrderTypeAPI] SELECT field updated to:', response.order_type_name, '(ID:', response.order_type_id, ')');
-                                    typeUpdated = true;
+                                    // console.log('[OrderTypeAPI] SELECT field updated to:', response.order_type_name, '(ID:', response.order_type_id, ')');
+                                    typeActuallyChanged = true;
                                 } 
                                 successfullyUpdatedSelect = true;
                             } else {
-                                console.warn('[OrderTypeAPI] Option with value', response.order_type_id, 'NOT FOUND in #id_order_type select list.');
+                                // console.warn('[OrderTypeAPI] Option with value', response.order_type_id, 'NOT FOUND in #id_order_type select list.');
                             }
                         }
                         
                         if (!successfullyUpdatedSelect && $orderTypeReadonlyDiv.length) {
-                            const currentText = $orderTypeReadonlyDiv.find('a').length ? $orderTypeReadonlyDiv.find('a').text() : $orderTypeReadonlyDiv.text();
-                            if (currentText.trim() !== response.order_type_name.trim()) {
+                            const currentTextInReadonly = $orderTypeReadonlyDiv.find('a').length ? $orderTypeReadonlyDiv.find('a').text().trim() : $orderTypeReadonlyDiv.text().trim();
+                            if (currentTextInReadonly.toLowerCase() !== response.order_type_name.trim().toLowerCase()) {
                                 const $linkInsideReadonly = $orderTypeReadonlyDiv.find('a');
                                 if ($linkInsideReadonly.length) {
                                     $linkInsideReadonly.text(response.order_type_name);
                                 } else {
                                     $orderTypeReadonlyDiv.text(response.order_type_name);
                                 }
-                                console.log('[OrderTypeAPI] READONLY field text updated to:', response.order_type_name);
-                                typeUpdated = true;
+                                // console.log('[OrderTypeAPI] READONLY field text updated to:', response.order_type_name);
+                                typeActuallyChanged = true;
                             }
                         }
                         
-                        if (typeUpdated) { // Генерируем событие, только если тип действительно изменился
+                        if (typeActuallyChanged) { 
                             $(document).trigger('order_type_dynamically_updated'); 
-                            console.log('[OrderTypeAPI] Triggered custom event "order_type_dynamically_updated".');
+                            // console.log('[OrderTypeAPI] Triggered custom event "order_type_dynamically_updated".');
                         }
 
                     } else if (response.error) {
                         console.error('[OrderTypeAPI] Error from API:', response.error);
-                    } else {
-                        console.warn('[OrderTypeAPI] Received incomplete data from API:', response);
                     }
                 },
                 error: function(xhr, status, error) {
@@ -256,15 +270,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Обработчики событий
-        // Для товаров: передаем 'cost_price' как ключ для базовой себестоимости
         $(document).on('change', '#product_items-group select[name$="-product"]', function() {
             fetchAndUpdatePriceAndStock(this, 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price');
         });
-        // Для услуг: costPriceJsonKey и stockJsonKey равны null, чтобы эти поля не обновлялись
         $(document).on('change', '#service_items-group select[name$="-service"]', function() {
             fetchAndUpdatePriceAndStock(this, 'price_at_order', '/orders-api/get-service-price/', 'price', null, null); 
         });
-
         $(document).on('input change', 
                        '#product_items-group input[name$="-quantity"], #service_items-group input[name$="-quantity"]', 
                        function() {
@@ -273,8 +284,19 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         $(document).on('formset:added', function(event, $rowFromArgs, formsetName) {
-            const $row = $($rowFromArgs); 
-            if ($row && $row.length && typeof $row.find === 'function') {
+            let $row = $($rowFromArgs); 
+            if (!($row && $row.length && typeof $row.find === 'function')) {
+                const $lastRowInFormset = $('#' + formsetName + '-group .dynamic-' + formsetName + ':not(.empty-form)').last();
+                if ($lastRowInFormset.length) {
+                    $row = $lastRowInFormset;
+                } else {
+                    updateOrderTotal(); 
+                    determineOrderTypeViaAPI();
+                    return; 
+                }
+            }
+            
+            if ($row.length && typeof $row.find === 'function') { 
                 const $selectsInRow = $row.find('select.admin-autocomplete');
                 if ($selectsInRow.length && typeof $selectsInRow.select2 === 'function') {
                      $selectsInRow.each(function() {
@@ -284,8 +306,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                      });
                 }
-            } else {
-                 console.warn(`[Listener] 'formset:added' event for ${formsetName}, but could not get a valid $row.`);
             }
             updateOrderTotal(); 
             determineOrderTypeViaAPI(); 
@@ -296,26 +316,25 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         // Инициализация при загрузке страницы
-        // Выполняем для всех существующих строк товаров и услуг
-        $('#product_items-group tr.dynamic-product_items:not(.empty-form)').each(function() {
+        $('#product_items-group tr.dynamic-product_items:not(.empty-form), #product_items-group .dynamic-product_items.form-row:not(.empty-form)').each(function() {
             const $select = $(this).find('select[name$="-product"]');
-            if ($select.length && $select.val()) { // Если товар уже выбран
+            if ($select.length && $select.val()) {
                 fetchAndUpdatePriceAndStock($select[0], 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price');
             }
-            updateItemTotal($(this)); // Обновить "Сумму по позиции"
         });
-        $('#service_items-group tr.dynamic-service_items:not(.empty-form)').each(function() {
+        $('#service_items-group tr.dynamic-service_items:not(.empty-form), #service_items-group .dynamic-service_items.form-row:not(.empty-form)').each(function() {
             const $select = $(this).find('select[name$="-service"]');
-            if ($select.length && $select.val()) { // Если услуга уже выбрана
+            if ($select.length && $select.val()) {
                  fetchAndUpdatePriceAndStock($select[0], 'price_at_order', '/orders-api/get-service-price/', 'price', null, null);
             }
-            updateItemTotal($(this)); // Обновить "Сумму по позиции"
         });
         
-        updateOrderTotal(); // Обновить общую сумму заказа
-        determineOrderTypeViaAPI(); // Определить тип заказа
+        setTimeout(function() {
+            updateOrderTotal(); 
+            determineOrderTypeViaAPI(); 
+        }, 250); // Немного увеличил задержку для инициализации
 
-        console.log('[jQuery] All event listeners attached. Order form dynamic features active.');
+        // console.log('[jQuery] All event listeners attached. Order form dynamic features active.');
 
     } else {
         console.warn('[Init] Django jQuery (django.jQuery) not found. Dynamic updates may not work correctly.');
