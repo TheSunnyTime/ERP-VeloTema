@@ -109,22 +109,55 @@ class OrderAdmin(admin.ModelAdmin):
     # --- Конфигурация полей и формы ---
     def get_fieldsets(self, request, obj=None):
         main_fields_tuple = ('client', 'manager', 'performer', 'order_type', 'repaired_item', 'status', 'notes')
-        if obj: 
+        
+        payment_closure_fieldset_fields = ['payment_method_on_closure'] # Базовое поле для этого fieldset
+
+        # Проверяем, есть ли у пользователя право видеть 'target_cash_register'
+        if request.user.is_superuser or request.user.has_perm('orders.can_view_target_cash_register'):
+            payment_closure_fieldset_fields.append('target_cash_register')
+
+        if obj:  # Для существующего заказа
             current_main_fields = list(main_fields_tuple)
-            return (
+            # Если нужно, здесь можно добавить/удалить 'manager' или 'performer' из current_main_fields
+            # в зависимости от того, редактируется заказ или просматривается, и какие права у юзера.
+            # Твоя текущая логика для 'manager' на странице создания остается ниже.
+
+            fieldsets_config = (
                 (None, {'fields': tuple(current_main_fields)}),
-                ('Оплата и закрытие заказа', {'fields': ('payment_method_on_closure', 'target_cash_register')}),
-                ('Суммы и даты (информация)', {'fields': ('get_total_order_amount_display', 'created_at', 'updated_at')}),
+                ('Оплата и закрытие заказа', {
+                    'fields': tuple(payment_closure_fieldset_fields) # Используем сформированный список полей
+                }),
+                ('Суммы и даты (информация)', {
+                    'fields': ('get_total_order_amount_display', 'created_at', 'updated_at')
+                }),
             )
-        else: 
+            return fieldsets_config
+        else:  # Для нового заказа
             new_order_main_fields = list(main_fields_tuple)
-            if 'manager' in new_order_main_fields:
-                 new_order_main_fields.remove('manager')
-            return (
-                (None, {'fields': tuple(new_order_main_fields)}), 
-                ('Оплата и закрытие заказа', {'fields': ('payment_method_on_closure',)}),
-                ('Суммы и даты (информация)', {'fields': ('get_total_order_amount_display',)}),
+            if 'manager' in new_order_main_fields: # Скрываем 'manager' при создании, он назначается автоматически
+                new_order_main_fields.remove('manager')
+            
+            # Для нового заказа поле target_cash_register обычно не показывается сразу,
+            # так как оно определяется автоматически при переводе в статус "Выдан".
+            # Если ты хочешь его показывать и для новых заказов (при наличии прав),
+            # то нужно будет аналогично добавить его в payment_closure_fieldset_fields_new.
+            # Пока оставляем как было в твоей логике (target_cash_register не было для новых).
+            payment_closure_fieldset_fields_new = ['payment_method_on_closure']
+            # Если нужно и для новых (и есть права):
+            # if request.user.is_superuser or request.user.has_perm('orders.can_view_target_cash_register'):
+            # payment_closure_fieldset_fields_new.append('target_cash_register')
+
+
+            fieldsets_config_new = (
+                (None, {'fields': tuple(new_order_main_fields)}),
+                ('Оплата и закрытие заказа', {
+                    'fields': tuple(payment_closure_fieldset_fields_new) 
+                }),
+                ('Суммы и даты (информация)', {
+                    'fields': ('get_total_order_amount_display',) # 'created_at', 'updated_at' для новых не нужны
+                }),
             )
+            return fieldsets_config_new
 
     def get_readonly_fields(self, request, obj=None):
         base_readonly = ['created_at', 'updated_at', 'get_total_order_amount_display']

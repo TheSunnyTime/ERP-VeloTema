@@ -81,7 +81,14 @@ class CashTransaction(models.Model):
     order = models.ForeignKey('orders.Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='cash_transactions', verbose_name="Заказ (если приход от заказа)")
     expense_category = models.ForeignKey(ExpenseCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='cash_transactions', verbose_name="Статья расхода (если расход)")
     paired_transfer_transaction = models.OneToOneField('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='reverse_paired_transfer', verbose_name="Парная транзакция перемещения")
-    class Meta: verbose_name = "Кассовая транзакция"; verbose_name_plural = "Кассовые транзакции"; ordering = ['-timestamp']
+    class Meta:
+        verbose_name = "Кассовая транзакция"
+        verbose_name_plural = "Кассовые транзакции"
+        ordering = ['-timestamp']
+        permissions = [
+            ('can_view_gko_cash_transactions', "Может просматривать транзакции ГКО"),
+            # здесь могут быть и другие твои права, если есть
+        ]
     def __str__(self): return f"{self.get_transaction_type_display()} на {self.amount} в {self.cash_register.name} ({self.timestamp.strftime('%Y-%m-%d %H:%M')})"
     def save(self, *args, **kwargs):
         is_new = self.pk is None

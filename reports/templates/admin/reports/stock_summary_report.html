@@ -1,37 +1,50 @@
 {% extends "admin/base_site.html" %}
-{% load static %} 
+{% load static i18n %} {# Добавил i18n для возможных будущих локализаций #}
 
 {% block extrastyle %}
   {{ block.super }}
+  <link rel="stylesheet" type="text/css" href="{% static "admin/css/changelists.css" %}"> {# Если нужен для общего вида #}
   <style>
-    /* ... (твои стили остаются без изменений) ... */
-    .report-summary { 
-      margin-top: 20px; 
+    .report-container { /* Общий контейнер для отчета внутри .module */
+      padding: 10px;
     }
-    .report-summary h2 {
-      margin-bottom: 10px; 
-      color: var(--body-fg);
+    .report-summary-tables h2, 
+    .report-summary-tables h3 { /* Стили для заголовков внутри отчета */
+      background: var(--module-header-bg, #79aec8);
+      color: var(--module-header-fg, #fff);
+      padding: 8px 10px;
+      font-size: 1em; /* Или подбери подходящий размер */
+      font-weight: bold;
+      margin-top: 20px;
+      margin-bottom: 10px;
     }
-    .report-summary table { 
-      width: auto; 
+    .report-summary-tables table { 
+      width: 100%; /* Растягиваем таблицы для лучшего вида в модуле */
       border-collapse: collapse; 
       margin-bottom: 20px; 
     }
-    .report-summary th, .report-summary td { 
+    .report-summary-tables th, 
+    .report-summary-tables td { 
       border: 1px solid var(--border-color, #ccc);
       padding: 8px 12px; 
       text-align: left; 
       color: var(--body-fg);
     }
-    .report-summary th {
+    .report-summary-tables th {
       background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); 
       color: var(--table-header-fg, var(--header-fg, #333333)); 
       font-weight: bold;
     }
-    .report-summary td.value {
+    .report-summary-tables td.value {
       text-align: right; 
-      font-weight: bold;
+      font-weight: normal; /* Убрал bold, чтобы не все числовые значения были жирными, если не нужно */
     }
+    .report-summary-tables td.total-value { /* Новый класс для итоговых сумм, если нужно их выделить */
+        text-align: right;
+        font-weight: bold;
+    }
+
+    /* Стили для tooltip остаются как были, они хорошие */
     .tooltip {
       position: relative;
       display: inline-block;
@@ -72,84 +85,95 @@
   </style>
 {% endblock %}
 
-{% block coltype %}colMS{% endblock %}
-{% block bodyclass %}{{ block.super }} app-reports model-stocksummary{% endblock %}
+{% block coltype %}colM{% endblock %} {# Используем colM для основного контента без сайдбара #}
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} change-list report-page{% endblock %}
+
 {% block content_title %}<h1>{{ title }}</h1>{% endblock %}
 
 {% block breadcrumbs %}
   <div class="breadcrumbs">
-    <a href="{% url 'admin:index' %}">Главная</a> &rsaquo;
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo; 
+    {# Если app_label и opts.verbose_name_plural доступны и корректны #}
+    {% if opts.app_config.verbose_name %}
+        <a href="{% url 'admin:app_list' opts.app_label %}">{{ opts.app_config.verbose_name }}</a> &rsaquo; 
+    {% endif %}
     {{ title }}
   </div>
 {% endblock %}
 
 {% block content %}
   <div id="content-main">
-    {% if user_can_view_this_specific_report %} {# Или просто if user.is_staff или твоя проверка прав #}
-      <div class="report-summary">
-        <table>
-          <tr>
-            <th>Показатель</th>
-            <th>Сумма</th>
-          </tr>
-          <tr>
-            <td>Общая себестоимость товаров на складе</td> {# Измененная метка #}
-            <td class="value">{{ total_cost_value|floatformat:2 }} руб.</td> {# Используем total_cost_value из view #}
-          </tr>
-          <tr>
-            <td>Общая розничная сумма всех товаров на складе</td>
-            <td class="value">{{ total_retail_value|floatformat:2 }} руб.</td>
-          </tr>
-          <tr>
-            <td>
-              Ожидаемая прибыль от продажи всех товаров
-              <div class="tooltip">
-                &#9432;
-                <span class="tooltiptext">{{ profit_calculation_hint }}</span>
-              </div>
-            </td>
-            <td class="value">{{ expected_profit|floatformat:2 }} руб.</td>
-          </tr>
-        </table>
-        
-        {% if products_in_stock %}
-          <h2>Детализация по товарам на складе:</h2>
+    <div class="module" id="stock-summary-report-module"> {# Оборачиваем все содержимое отчета в стандартный .module #}
+      <div class="report-container"> {# Дополнительный контейнер для внутренних отступов, если нужно #}
+        <div class="report-summary-tables"> {# Класс для применения стилей к таблицам и их заголовкам #}
+          {# Убираем условный блок if user_can_view_this_specific_report, так как проверка прав во view #}
+          {# Основная сводная таблица #}
           <table>
             <thead>
               <tr>
-                <th>Наименование товара</th>
-                <th>Артикул</th>
-                <th>Категория</th>
-                <th>Остаток</th>
-                <th>Себестоимость (ед.)</th>
-                <th>Розничная цена (ед.)</th>
-                <th>Общая себестоимость</th> {# Новая колонка #}
-                <th>Общая розничная стоимость</th> {# Новая колонка #}
+                <th>Показатель</th>
+                <th style="text-align: right;">Сумма</th> {# Выровнял заголовок суммы вправо #}
               </tr>
             </thead>
             <tbody>
-              {% for product in products_in_stock %}
-                <tr>
-                  <td>{{ product.name }}</td>
-                  <td>{{ product.sku|default_if_none:"" }}</td>
-                  <td>{{ product.category.name|default_if_none:"" }}</td>
-                  <td class="value">{{ product.stock_quantity }}</td>
-                  <td class="value">{{ product.cost_price|floatformat:2 }}</td> 
-                  <td class="value">{{ product.retail_price|floatformat:2 }}</td>
-                  {# --- ИЗМЕНЕНИЕ ЗДЕСЬ --- #}
-                  <td class="value"> {{ product.total_cost_value_in_stock|floatformat:2 }} </td> 
-                  <td class="value">{{ product.total_retail_value_in_stock|floatformat:2 }}</td>
-                  {# --- КОНЕЦ ИЗМЕНЕНИЯ --- #}
-                </tr>
-              {% endfor %}
+              <tr>
+                <td>Общая себестоимость товаров на складе</td>
+                <td class="total-value">{{ total_cost_value|floatformat:2 }} руб.</td>
+              </tr>
+              <tr>
+                <td>Общая розничная сумма всех товаров на складе</td>
+                <td class="total-value">{{ total_retail_value|floatformat:2 }} руб.</td>
+              </tr>
+              <tr>
+                <td>
+                  Ожидаемая прибыль от продажи всех товаров
+                  <div class="tooltip">
+                    &#9432;
+                    <span class="tooltiptext">{{ profit_calculation_hint }}</span>
+                  </div>
+                </td>
+                <td class="total-value">{{ expected_profit|floatformat:2 }} руб.</td>
+              </tr>
             </tbody>
           </table>
-        {% else %}
-          <p>Нет товаров на складе для отображения в детализации.</p>
-        {% endif %}
+          
+          {% if products_in_stock %}
+            <h2>Детализация по товарам на складе:</h2>
+            <div class="results"> {# Стандартный класс для обертки таблицы в админке #}
+              <table id="result_list"> {# Стандартный ID для таблиц в админке #}
+                <thead>
+                  <tr>
+                    <th>Наименование товара</th>
+                    <th>Артикул</th>
+                    <th>Категория</th>
+                    <th style="text-align: right;">Остаток</th>
+                    <th style="text-align: right;">Себест. (ед.)</th>
+                    <th style="text-align: right;">Розн. цена (ед.)</th>
+                    <th style="text-align: right;">Общая себест.</th>
+                    <th style="text-align: right;">Общая розн. стоимость</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for product in products_in_stock %}
+                    <tr class="{% cycle 'row1' 'row2' %}">
+                      <td>{{ product.name }}</td>
+                      <td>{{ product.sku|default_if_none:"" }}</td>
+                      <td>{{ product.category.name|default_if_none:"" }}</td>
+                      <td class="value">{{ product.stock_quantity }}</td>
+                      <td class="value">{{ product.cost_price|floatformat:2 }}</td> 
+                      <td class="value">{{ product.retail_price|floatformat:2 }}</td>
+                      <td class="value">{{ product.total_cost_value_in_stock|floatformat:2 }}</td> 
+                      <td class="value">{{ product.total_retail_value_in_stock|floatformat:2 }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p>Нет товаров на складе для отображения в детализации.</p>
+          {% endif %}
+        </div>
       </div>
-    {% else %}
-      <p>У вас нет прав для просмотра этого отчета.</p>
-    {% endif %}
+    </div>
   </div>
 {% endblock %}

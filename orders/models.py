@@ -90,6 +90,7 @@ class Order(models.Model):
         ordering = ['-created_at']
         permissions = [
             ("can_change_order_type_dynamically", "Может изменять тип заказа (динамически)"),
+                        ("can_view_target_cash_register", "Может видеть кассу для зачисления в заказе"),
         ]
 
     def __init__(self, *args, **kwargs): 
