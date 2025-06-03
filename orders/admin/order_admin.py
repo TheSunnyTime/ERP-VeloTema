@@ -8,6 +8,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse 
 from django.utils import timezone 
+from django.utils.html import format_html
+from uiconfig.models import OrderStatusColor # Наше приложение с цветами
 
 # Импорты из текущего приложения orders
 from ..models import Order, OrderType # Product здесь не нужен, он импортируется ниже из products.models
@@ -28,11 +30,14 @@ from cash_register.models import CashRegister, CashTransaction
 class OrderAdmin(admin.ModelAdmin):
     form = OrderAdminForm
     list_display = (
-        'id', 'client', 
+        'id', 
+        'client', 
         'display_manager_name',       
-        'display_performer_name',     
+        'display_performer_name',
         'order_type', 
-        'status', 'payment_method_on_closure', 'target_cash_register', 'created_at', 
+        'repaired_item', 
+        'colored_status', 
+        'created_at',
         'get_total_order_amount_display' 
     )
     list_filter = (
@@ -46,6 +51,16 @@ class OrderAdmin(admin.ModelAdmin):
     autocomplete_fields = ['manager', 'performer', 'client',] # Раскомментировал, если они нужны
     inlines = [OrderProductItemInline, OrderServiceItemInline]
     change_form_template = 'admin/orders/order/change_form_with_documents.html'
+
+
+    def __init__(self, model, admin_site): # <--- ДОБАВЛЕН КОНСТРУКТОР
+        super().__init__(model, admin_site)
+        # Загружаем все настроенные цвета статусов один раз
+        # чтобы не делать запрос к БД для каждой строки списка
+        self.status_colors_map = {
+            color_setting.status_key: color_setting.hex_color
+            for color_setting in OrderStatusColor.objects.all()
+        }
 
     # --- Методы для отображения в list_display ---
     def display_manager_name(self, obj):
@@ -66,10 +81,34 @@ class OrderAdmin(admin.ModelAdmin):
         if obj.pk: return obj.calculate_total_amount()
         return Decimal('0.00')
     get_total_order_amount_display.short_description = "Общая сумма заказа"
+    
+    def colored_status(self, obj): # <--- НАШ НОВЫЙ МЕТОД
+        status_key = obj.status
+        display_name = obj.get_status_display() # Человекочитаемое имя статуса
+        hex_color = self.status_colors_map.get(status_key, '#FFFFFF') # Белый по умолчанию, если цвет не найден
+
+        # Простая логика для определения цвета текста для лучшего контраста
+        # Это очень упрощенный вариант. Для более точного определения нужен анализ яркости.
+        try:
+            r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+            luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+            text_color = '#000000' if luminance > 0.5 else '#FFFFFF'
+        except: # На случай некорректного HEX или если нет #
+            text_color = '#000000'
+
+
+        return format_html(
+            '<span style="background-color: {}; color: {}; padding: 5px 10px; border-radius: 4px;">{}</span>',
+            hex_color,
+            text_color, # Используем рассчитанный цвет текста
+            display_name,
+        )
+    colored_status.short_description = "Статус" # Название колонки
+    colored_status.admin_order_field = 'status' # Позволяет сортировку по оригинальному полю статуса
 
     # --- Конфигурация полей и формы ---
     def get_fieldsets(self, request, obj=None):
-        main_fields_tuple = ('client', 'manager', 'performer', 'order_type', 'status', 'notes')
+        main_fields_tuple = ('client', 'manager', 'performer', 'order_type', 'repaired_item', 'status', 'notes')
         if obj: 
             current_main_fields = list(main_fields_tuple)
             return (

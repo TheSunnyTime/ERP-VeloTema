@@ -65,6 +65,15 @@ class Order(models.Model):
         related_name='performed_orders',
         verbose_name="Исполнитель"
     )
+
+    repaired_item = models.CharField(
+        max_length=255, 
+        blank=True, 
+        null=True, # Если используешь CharField, null=True часто не рекомендуется, blank=True достаточно. Но если очень нужно null, то ок.
+                  # Для CharField лучше default="" и blank=True, но раз ты упомянул не обязательное, пусть будет null=True для начала.
+        verbose_name="Изделие"
+    )
+
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name='orders', verbose_name="Клиент")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW, verbose_name="Статус заказа")
     payment_method_on_closure = models.CharField(max_length=20, choices=ORDER_PAYMENT_METHOD_CHOICES, null=True, blank=True, verbose_name="Метод оплаты при закрытии")
