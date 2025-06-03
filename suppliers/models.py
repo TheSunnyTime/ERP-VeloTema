@@ -70,6 +70,7 @@ class Supplier(models.Model):
         permissions = [
             ("can_edit_supplier_notes", "Может редактировать примечания поставщика"),
             ("can_change_supplier_status", "Может изменять статус активности поставщика"),
+            ('can_edit_received_supply', "Может редактировать оприходованные поставки"),
         ]
 
     def __str__(self):

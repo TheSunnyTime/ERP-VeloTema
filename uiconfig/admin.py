@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import OrderStatusColor
 from django.utils.html import format_html # Для отображения цвета
+from uiconfig.models import SupplyStatusColor
 
 @admin.register(OrderStatusColor)
 class OrderStatusColorAdmin(admin.ModelAdmin):
@@ -45,3 +46,19 @@ class OrderStatusColorAdmin(admin.ModelAdmin):
         if request.user.is_superuser:
             return True
         return request.user.has_perm('uiconfig.can_manage_status_colors')
+@admin.register(SupplyStatusColor)
+class SupplyStatusColorAdmin(admin.ModelAdmin):
+    list_display = ('status_name', 'status_key', 'colored_status_preview', 'hex_color')
+    list_editable = ('hex_color',)
+    search_fields = ('status_name', 'status_key')
+    ordering = ('status_name',)
+
+    # Если ты определял кастомные права для модели, можно их здесь учитывать
+    # def has_view_permission(self, request, obj=None):
+    #     return request.user.has_perm('uiconfig.view_supplystatuscolor') or request.user.is_superuser
+    # def has_change_permission(self, request, obj=None):
+    #     return request.user.has_perm('uiconfig.change_supplystatuscolor') or request.user.is_superuser
+    # def has_add_permission(self, request):
+    #     return request.user.has_perm('uiconfig.add_supplystatuscolor') or request.user.is_superuser
+    # def has_delete_permission(self, request, obj=None):
+    #     return request.user.has_perm('uiconfig.delete_supplystatuscolor') or request.user.is_superuser

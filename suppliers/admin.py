@@ -1,7 +1,10 @@
 # suppliers/admin.py
 from django.contrib import admin
+from django.utils.html import format_html # <--- ДОБАВЬ ЭТОТ ИМПОРТ
 from .models import Supplier, Supply, SupplyItem
+from uiconfig.models import SupplyStatusColor # <--- ДОБАВЬ ЭТОТ ИМПОРТ
 
+# ... (SupplierAdmin и SupplyItemInline как были) ...
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
     # ... (твой существующий SupplierAdmin, который мы настраивали) ...
@@ -41,12 +44,46 @@ class SupplyItemInline(admin.TabularInline): # Или StackedInline
 
 @admin.register(Supply)
 class SupplyAdmin(admin.ModelAdmin):
-    list_display = ('id', 'supplier', 'receipt_date', 'document_number', 'status', 'created_by', 'created_at')
+    # --- Инициализация для загрузки цветов ---
+    def __init__(self, model, admin_site):
+        super().__init__(model, admin_site)
+        # Загружаем цвета статусов один раз при инициализации Admin класса
+        # Это может вызвать RuntimeWarning при запуске, если uiconfig еще не загружен,
+        # но ты решил пока игнорировать это предупреждение.
+        try:
+            self.supply_status_colors_map = {
+                color.status_key: color.hex_color
+                for color in SupplyStatusColor.objects.all()
+            }
+        except Exception as e: # Ловим возможные ошибки, если БД еще не готова (например, при первом запуске)
+            print(f"Warning: Could not load supply status colors in SupplyAdmin: {e}")
+            self.supply_status_colors_map = {}
+
+    # --- Метод для отображения цветного статуса ---
+    def colored_status(self, obj):
+        status_display = obj.get_status_display() # Человекочитаемое имя статуса
+        hex_color = self.supply_status_colors_map.get(obj.status) # Получаем цвет из карты
+
+        if hex_color:
+            # Определяем цвет текста для контраста (простая логика)
+            text_color = '#ffffff' if int(hex_color[1:3], 16) * 0.299 + int(hex_color[3:5], 16) * 0.587 + int(hex_color[5:7], 16) * 0.114 < 128 else '#000000'
+            return format_html(
+                '<span style="background-color: {0}; padding: 3px 7px; border-radius: 4px; color: {1};"><strong>{2}</strong></span>',
+                hex_color,
+                text_color,
+                status_display
+            )
+        return status_display # Возвращаем обычный текст, если цвет не найден
+
+    colored_status.short_description = 'Статус поставки' # Название колонки
+    colored_status.admin_order_field = 'status' # Позволяет сортировку по этому полю
+
+    list_display = ('id', 'supplier', 'receipt_date', 'document_number', 'colored_status', 'created_by', 'created_at') # Заменили 'status' на 'colored_status'
     list_filter = ('status', 'supplier', 'receipt_date', 'created_by')
     search_fields = ('id', 'supplier__name', 'document_number', 'notes')
     autocomplete_fields = ['supplier', 'created_by']
     inlines = [SupplyItemInline]
-    list_editable = ('status',) # Осторожно с этим, лучше менять статус через actions или на форме
+    # list_editable = ('status',) # РЕКОМЕНДУЮ УБРАТЬ list_editable для статуса, если используем цветной статус
     ordering = ('-receipt_date', '-id')
     
     fieldsets = (
@@ -57,57 +94,13 @@ class SupplyAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'created_by') # created_by лучше сделать readonly после установки
 
     def save_model(self, request, obj, form, change):
-        if not obj.pk: # Если объект создается
+        if not obj.pk:
             obj.created_by = request.user
-        
-        old_status = None
-        if obj.pk:
-            try:
-                old_status = Supply.objects.get(pk=obj.pk).status
-            except Supply.DoesNotExist:
-                pass
-        
         super().save_model(request, obj, form, change)
-        
-        # Логика оприходования после сохранения инлайнов будет в save_related
-        # или если статус меняется прямо в save_model, и инлайны уже есть.
-        # Но лучше перенести в save_related для надежности.
 
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
-        # Этот метод вызывается ПОСЛЕ сохранения основной модели И ЕЕ ИНЛАЙНОВ.
-        # Идеальное место для вызова update_stock_on_received, если статус изменился на "Оприходовано"
-        order_instance = form.instance # Это объект Supply
-        
-        # Проверяем, был ли статус изменен на "Оприходовано" именно сейчас
-        # (предполагаем, что self._previous_status тут не сработает так, как для Order)
-        # Поэтому, если статус "Оприходовано", просто вызываем.
-        # Для идемпотентности update_stock_on_received должен сам проверять, не были ли остатки уже обновлены по этой поставке.
-        # Либо нам нужна более сложная логика отслеживания "первого" перехода в "Оприходовано".
-        
-        # Простой вариант: если статус "Оприходовано", пытаемся обновить.
-        # Внутри update_stock_on_received можно добавить проверку, чтобы не делать это дважды.
-        # Однако, это вызовется каждый раз при сохранении Supply со статусом "Оприходовано".
-        # Это не идеально. Лучше отслеживать изменение статуса.
-
-        # Пока что оставим вызов update_stock_on_received в Supply.save(), 
-        # но с пониманием, что он должен быть идемпотентным или вызываться более хитро.
-        # Для админки более правильно было бы сделать "действие" (action) "Оприходовать выбранные поставки".
-        # Или перенести логику из Supply.save() сюда, если статус изменился.
-
-        # Для начала, оставим логику в Supply.save(), она сработает после super().save_model()
-        # если статус там уже был установлен.
-        # Но если статус меняется через list_editable или действие, то Supply.save() может не быть идеальным местом.
-        # Для list_editable, save() модели вызывается.
-
-        # Если мы хотим явный вызов после того, как все (включая инлайны) сохранено и статус стал "Оприходовано":
-        # if order_instance.status == Supply.STATUS_RECEIVED:
-        #     # Здесь нужно проверить, был ли он другим до этого сохранения
-        #     # Это сложнее без _previous_status как в Order
-        #     # Проще всего сделать так, чтобы update_stock_on_received была безопасна для повторного вызова
-        #     # или выполнялась только если есть флаг "еще не оприходовано".
-        #     order_instance.update_stock_on_received() # Вызовем еще раз на всякий случай, если инлайны только что сохранились
-        pass # Логика оприходования пока в Supply.save() или будет пересмотрена
+        # Логика вызова update_stock_on_received остается в Supply.save() как и было
