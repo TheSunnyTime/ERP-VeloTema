@@ -24,8 +24,8 @@ ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if hos
 
 
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 20000 # Или другое значение, больше 1000
-                                     # Подбери значение, достаточное для твоих нужд,
-                                     # но не слишком большое без необходимости.
+                                      # Подбери значение, достаточное для твоих нужд,
+                                      # но не слишком большое без необходимости.
 
 # Application definition
 INSTALLED_APPS = [
@@ -34,22 +34,24 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'suppliers.apps.SuppliersConfig',
-    'django.contrib.staticfiles',
+    'django.contrib.staticfiles', # Перенес сюда, к остальным django.contrib
+    'django.contrib.humanize', # Добавил, если вдруг понадобится для форматирования чисел/дат
 
-    # Ваши приложения
+    # Ваши кастомные приложения
     'products.apps.ProductsConfig',
     'orders.apps.OrdersConfig',
     'clients.apps.ClientsConfig',
-    'reports.apps.ReportsConfig',
     'cash_register.apps.CashRegisterConfig',
-    'utils.apps.UtilsConfig', 
-    'salary_management.apps.SalaryManagementConfig'
+    'utils.apps.UtilsConfig',
+    'salary_management.apps.SalaryManagementConfig',
+    'reports.apps.ReportsConfig',
+    'suppliers.apps.SuppliersConfig', # Ты указал его раньше staticfiles, перенес к остальным кастомным
+    'uiconfig.apps.UiconfigConfig',   # <-- ДОБАВЛЕНО НАШЕ НОВОЕ ПРИЛОЖЕНИЕ
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware', # <--- ДОБАВЬ ЭТУ СТРОКУ
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -64,7 +66,7 @@ TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         # Путь к общим шаблонам на уровне проекта (например, templates/admin/base_site.html)
-        'DIRS': [BASE_DIR / 'templates'], 
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True, # Искать шаблоны также в папках templates внутри приложений
         'OPTIONS': {
             'context_processors': [
@@ -114,10 +116,10 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 
-# STATICFILES_DIRS - для статики, не привязанной к конкретному приложению, 
+# STATICFILES_DIRS - для статики, не привязанной к конкретному приложению,
 # а лежащей в общей папке static на уровне проекта (рядом с manage.py)
 STATICFILES_DIRS = [
-    BASE_DIR / "static", 
+    BASE_DIR / "static",
 ]
 
 # STATIC_ROOT - папка, куда будет собираться вся статика командой collectstatic
