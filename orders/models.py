@@ -1,22 +1,16 @@
 # F:\CRM 2.0\ERP\orders\models.py
 from django.db import models
-# transaction не используется в этом файле напрямую, если только не в закомментированном коде или неявных операциях.
-# Если он не нужен, можно убрать. Оставляю на всякий случай, если где-то есть неявное использование.
-from django.db import transaction
+from django.db import transaction # Оставляем, если предполагается использование
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.utils import timezone # Не используется напрямую в этом файле, но может быть полезен для будущих доработок.
+# from django.utils import timezone # Не используется напрямую здесь
 from decimal import Decimal, ROUND_HALF_UP
 
 from products.models import Product
 from clients.models import Client
-from cash_register.models import CashTransaction, CashRegister # CashTransaction не используется напрямую, но CashRegister используется.
-# Модели из salary_management здесь не используются, их импорт можно убрать.
-# from salary_management.models import EmployeeRate, SalaryCalculation, SalaryCalculationDetail
-
+from cash_register.models import CashRegister # CashTransaction не используется напрямую
 
 class OrderType(models.Model):
-    # Константы для имен типов заказов
     TYPE_REPAIR = "Ремонт"
     TYPE_SALE = "Продажа"
     TYPE_UNDEFINED = "Определить"
@@ -83,9 +77,7 @@ class Order(models.Model):
     repaired_item = models.CharField(
         max_length=255,
         blank=True,
-        # null=True для CharField обычно заменяется default="" и blank=True.
-        # Если null=True критично, оставляем. Иначе можно default="".
-        default="", # Добавил default, если null=True не является строгим требованием
+        default="",
         verbose_name="Изделие"
     )
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name='orders', verbose_name="Клиент")
@@ -93,14 +85,14 @@ class Order(models.Model):
     payment_method_on_closure = models.CharField(
         max_length=20,
         choices=ORDER_PAYMENT_METHOD_CHOICES,
-        null=True, # null=True здесь оправдан, т.к. метод оплаты указывается только при закрытии
+        null=True,
         blank=True,
         verbose_name="Метод оплаты при закрытии"
     )
     target_cash_register = models.ForeignKey(
         CashRegister,
         on_delete=models.SET_NULL,
-        null=True, # null=True здесь оправдан, т.к. касса определяется при закрытии
+        null=True,
         blank=True,
         verbose_name="Касса для зачисления (авто)"
     )
@@ -108,7 +100,7 @@ class Order(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
     notes = models.TextField(blank=True, null=True, verbose_name="Примечания к заказу")
 
-    _previous_status = None # Для отслеживания изменения статуса
+    _previous_status = None
 
     class Meta:
         verbose_name = "Заказ"
@@ -121,73 +113,53 @@ class Order(models.Model):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Сохраняем начальное значение статуса, если объект уже существует в БД
         self._previous_status = self.status if self.pk else None
-
 
     def __str__(self):
         return f"Заказ №{self.id or 'Новый'} от {self.created_at.strftime('%d.%m.%Y %H:%M') if self.pk else ' еще не создан'}"
 
     def calculate_total_amount(self):
         total = Decimal('0.00')
-        if self.pk: # Рассчитываем только для сохраненных заказов, имеющих связанные элементы
+        if self.pk:
             for item in self.product_items.all():
                 item_total = item.get_item_total()
-                if item_total is not None:
-                    total += item_total
+                if item_total is not None: total += item_total
             for item in self.service_items.all():
                 item_total = item.get_item_total()
-                if item_total is not None:
-                    total += item_total
+                if item_total is not None: total += item_total
         return total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     def determine_and_set_order_type(self):
-        """
-        Определяет и устанавливает тип заказа на основе наличия товаров или услуг.
-        Возвращает True, если тип был изменен, иначе False.
-        """
         original_order_type = self.order_type
-
-        if not self.pk: # Для нового, еще не сохраненного заказа
+        if not self.pk:
             try:
                 undefined_type = OrderType.objects.get(name=OrderType.TYPE_UNDEFINED)
                 self.order_type = undefined_type
                 return original_order_type != self.order_type
             except OrderType.DoesNotExist:
-                self.order_type = None # Или логировать ошибку, т.к. тип "Определить" должен существовать
+                self.order_type = None
                 return original_order_type != self.order_type
-
-        # Не переопределять тип для уже выданного заказа, если статус не менялся с "Выдан"
         if self.status == self.STATUS_ISSUED and self._previous_status == self.STATUS_ISSUED:
             return False
-
         try:
-            # Получаем типы один раз для эффективности, если они часто используются
-            # Можно также кешировать их на уровне класса или модуля, если OrderType редко меняются
             repair_type_obj = OrderType.objects.get(name=OrderType.TYPE_REPAIR)
             sale_type_obj = OrderType.objects.get(name=OrderType.TYPE_SALE)
             undefined_type_obj = OrderType.objects.get(name=OrderType.TYPE_UNDEFINED)
         except OrderType.DoesNotExist:
-            # Логировать ошибку: один из базовых типов заказа отсутствует в БД
-            return False # Не можем определить тип
-
+            return False
         has_services = self.service_items.exists()
         has_products = self.product_items.exists()
-
-        determined_type = undefined_type_obj # По умолчанию
+        determined_type = undefined_type_obj
         if has_services:
             determined_type = repair_type_obj
-        elif has_products: # Только если нет услуг, но есть товары
+        elif has_products:
             determined_type = sale_type_obj
-
         if self.order_type != determined_type:
             self.order_type = determined_type
             return True
         return False
 
     def get_status_display_for_key(self, status_key):
-        """Вспомогательный метод для получения отображаемого имени статуса по ключу."""
-        # Кэшируем словарь для небольшого повышения производительности, если метод вызывается часто
         if not hasattr(self.__class__, '_status_choices_map_cache'):
             self.__class__._status_choices_map_cache = dict(self.STATUS_CHOICES)
         return self.__class__._status_choices_map_cache.get(status_key, status_key)
@@ -212,36 +184,19 @@ class Order(models.Model):
             })
 
         # 3. Валидация для исполнителя
-        if self.order_type:
-            # Используем константу из OrderType
-            if self.order_type.name == OrderType.TYPE_REPAIR:
-                if self.status != self.STATUS_NEW and not self.performer:
-                    status_new_display_name = self.get_status_display_for_key(self.STATUS_NEW)
-                    raise ValidationError({
-                        'performer': ValidationError(
-                            f"Поле 'Исполнитель' обязательно для типа заказа '{OrderType.TYPE_REPAIR}', "
-                            f"если статус не '{status_new_display_name}'.",
-                            code='performer_required_for_repair_if_not_new_model'
-                        )
-                    })
-        # Нет необходимости в try-except AttributeError для self.order_type.name,
-        # так как if self.order_type: уже проверяет, что order_type не None.
-
+        if self.order_type and self.order_type.name == OrderType.TYPE_REPAIR:
+            if self.status != self.STATUS_NEW and not self.performer:
+                status_new_display_name = self.get_status_display_for_key(self.STATUS_NEW)
+                raise ValidationError({
+                    'performer': ValidationError(
+                        f"Поле 'Исполнитель' обязательно для типа заказа '{OrderType.TYPE_REPAIR}', "
+                        f"если статус не '{status_new_display_name}'.",
+                        code='performer_required_for_repair_if_not_new_model' # Уникальный код ошибки
+                    )
+                })
 
     def save(self, *args, **kwargs):
-        # Логика _previous_status должна быть до super().save(), если мы хотим сравнить
-        # текущее состояние с тем, что было до любых изменений в этом вызове save.
-        # Однако, если _previous_status нужен для отслеживания состояния из БД перед этим сохранением,
-        # то __init__ и обновление _previous_status после super().save() - правильный подход.
-        # Для определения, был ли статус изменен с НЕ-Выдан на Выдан, текущая логика с __init__ и
-        # обновлением _previous_status в конце save - корректна.
-
-        # Если нужно выполнить какие-то действия перед сохранением на основе _previous_status,
-        # то _previous_status должен быть установлен в __init__ и, возможно, не меняться до конца save.
-        # Сейчас _previous_status отражает состояние объекта *после* последнего успешного сохранения.
-
         super().save(*args, **kwargs)
-        # Обновляем _previous_status после успешного сохранения, чтобы он отражал текущее состояние в БД
         self._previous_status = self.status
 
 
@@ -251,64 +206,45 @@ class OrderProductItem(models.Model):
     quantity = models.PositiveIntegerField(default=1, verbose_name="Количество")
     price_at_order = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Цена товара на момент заказа", null=True, blank=True)
     cost_price_at_sale = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        verbose_name="Себестоимость на момент продажи (FIFO)", # Изменил "заказа" на "продажи" для ясности
-        null=True,
-        blank=True
+        max_digits=10, decimal_places=2, verbose_name="Себестоимость на момент продажи (FIFO)", null=True, blank=True
     )
-
     class Meta:
         verbose_name = "Позиция товара в заказе"
         verbose_name_plural = "Позиции товаров в заказе"
-        # unique_together = ['order', 'product'] # Рассмотреть, если один и тот же товар не должен добавляться дважды
-
     def __str__(self):
         product_name = self.product.name if self.product else "Товар не указан"
         order_id_str = str(self.order_id) if self.order_id else "неизв. заказ"
         return f"{product_name} ({self.quantity} шт.) в заказе №{order_id_str}"
-
-    def get_item_total(self):
-        if self.price_at_order is not None and self.quantity is not None and self.quantity > 0:
-            # Убедимся, что работаем с Decimal
-            price = Decimal(str(self.price_at_order))
-            qty = Decimal(str(self.quantity)) # quantity уже PositiveIntegerField, но для единообразия
-            return (price * qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        return Decimal('0.00')
-
-    def save(self, *args, **kwargs):
-        if self.pk is None or self.price_at_order is None or self.price_at_order == Decimal('0.00'): # При создании или если цена не установлена
-            if self.product:
-                self.price_at_order = self.product.retail_price
-        # cost_price_at_sale устанавливается внешней логикой (FIFO)
-        super().save(*args, **kwargs)
-
-
-class OrderServiceItem(models.Model):
-    order = models.ForeignKey(Order, related_name='service_items', on_delete=models.CASCADE, verbose_name="Заказ")
-    service = models.ForeignKey(Service, related_name='order_service_items', on_delete=models.PROTECT, verbose_name="Услуга")
-    quantity = models.PositiveIntegerField(default=1, verbose_name="Количество")
-    price_at_order = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Цена услуги на момент заказа", null=True, blank=True)
-
-    class Meta:
-        verbose_name = "Позиция услуги в заказе"
-        verbose_name_plural = "Позиции услуг в заказе"
-        # unique_together = ['order', 'service'] # Рассмотреть, если одна и та же услуга не должна добавляться дважды
-
-    def __str__(self):
-        service_name = self.service.name if self.service else "Услуга не указана"
-        order_id_str = str(self.order_id) if self.order_id else "неизв. заказ"
-        return f"{service_name} ({self.quantity} шт.) в заказе №{order_id_str}"
-
     def get_item_total(self):
         if self.price_at_order is not None and self.quantity is not None and self.quantity > 0:
             price = Decimal(str(self.price_at_order))
             qty = Decimal(str(self.quantity))
             return (price * qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return Decimal('0.00')
-
     def save(self, *args, **kwargs):
-        if self.pk is None or self.price_at_order is None or self.price_at_order == Decimal('0.00'): # При создании или если цена не установлена
-            if self.service:
-                self.price_at_order = self.service.price
+        if self.pk is None or self.price_at_order is None or self.price_at_order == Decimal('0.00'):
+            if self.product: self.price_at_order = self.product.retail_price
+        super().save(*args, **kwargs)
+
+class OrderServiceItem(models.Model):
+    order = models.ForeignKey(Order, related_name='service_items', on_delete=models.CASCADE, verbose_name="Заказ")
+    service = models.ForeignKey(Service, related_name='order_service_items', on_delete=models.PROTECT, verbose_name="Услуга")
+    quantity = models.PositiveIntegerField(default=1, verbose_name="Количество")
+    price_at_order = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Цена услуги на момент заказа", null=True, blank=True)
+    class Meta:
+        verbose_name = "Позиция услуги в заказе"
+        verbose_name_plural = "Позиции услуг в заказе"
+    def __str__(self):
+        service_name = self.service.name if self.service else "Услуга не указана"
+        order_id_str = str(self.order_id) if self.order_id else "неизв. заказ"
+        return f"{service_name} ({self.quantity} шт.) в заказе №{order_id_str}"
+    def get_item_total(self):
+        if self.price_at_order is not None and self.quantity is not None and self.quantity > 0:
+            price = Decimal(str(self.price_at_order))
+            qty = Decimal(str(self.quantity))
+            return (price * qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return Decimal('0.00')
+    def save(self, *args, **kwargs):
+        if self.pk is None or self.price_at_order is None or self.price_at_order == Decimal('0.00'):
+            if self.service: self.price_at_order = self.service.price
         super().save(*args, **kwargs)

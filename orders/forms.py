@@ -78,18 +78,6 @@ class OrderAdminForm(forms.ModelForm):
             #     self.fields['performer'].widget.attrs.update({'class': 'conditionally-required-by-server'})
 
 
-    def clean_performer(self):
-        """
-        Вызывается для валидации поля 'performer' на уровне формы.
-        Мы просто возвращаем значение. Это помогает предотвратить
-        генерацию стандартной ошибки "Это поле обязательно", если
-        какой-то механизм Django все еще пытается ее вызвать, несмотря на
-        self.fields['performer'].required = False в __init__.
-        Основная логика валидации (обязательность в зависимости от типа/статуса)
-        находится в методе Order.clean().
-        """
-        return self.cleaned_data.get('performer')
-
     def clean(self):
         cleaned_data = super().clean()
         status = cleaned_data.get('status')
