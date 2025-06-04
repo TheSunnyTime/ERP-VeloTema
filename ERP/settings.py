@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'reports.apps.ReportsConfig',
     'suppliers.apps.SuppliersConfig', # Ты указал его раньше staticfiles, перенес к остальным кастомным
     'uiconfig.apps.UiconfigConfig',   # <-- ДОБАВЛЕНО НАШЕ НОВОЕ ПРИЛОЖЕНИЕ
+    'tasks.apps.TasksConfig', # или просто 'tasks'
 ]
 
 MIDDLEWARE = [

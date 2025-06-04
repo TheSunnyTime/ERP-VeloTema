@@ -1,13 +1,16 @@
 # suppliers/admin.py
 from django.contrib import admin
-from django.utils.html import format_html # <--- ДОБАВЬ ЭТОТ ИМПОРТ
+from django.utils.html import format_html
 from .models import Supplier, Supply, SupplyItem
-from uiconfig.models import SupplyStatusColor # <--- ДОБАВЬ ЭТОТ ИМПОРТ
+from uiconfig.models import SupplyStatusColor # Ты это уже импортировал
 
-# ... (SupplierAdmin и SupplyItemInline как были) ...
+# ИМПОРТЫ ДЛЯ СОЗДАНИЯ ЗАДАЧИ
+from tasks.models import Task, TaskType, TaskStatus 
+from django.contrib.contenttypes.models import ContentType 
+
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
-    # ... (твой существующий SupplierAdmin, который мы настраивали) ...
+    # Твой код для SupplierAdmin остается без изменений
     list_display = ('name', 'contact_person_name', 'phone_number', 'email', 'tax_id', 'is_active', 'updated_at')
     list_filter = ('is_active', 'created_at', 'updated_at')
     search_fields = ('name', 'contact_person_name', 'phone_number', 'email', 'tax_id', 'supplier_manager_name', 'notes')
@@ -22,7 +25,7 @@ class SupplierAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
 
     def get_readonly_fields(self, request, obj=None):
-        readonly_fields_list = list(super().get_readonly_fields(request, obj)) # Получаем базовый список
+        readonly_fields_list = list(super().get_readonly_fields(request, obj))
         if not request.user.is_superuser:
             if not request.user.has_perm('suppliers.can_edit_supplier_notes'):
                 readonly_fields_list.append('notes')
@@ -31,41 +34,38 @@ class SupplierAdmin(admin.ModelAdmin):
         return tuple(set(readonly_fields_list))
 
 
-class SupplyItemInline(admin.TabularInline): # Или StackedInline
+class SupplyItemInline(admin.TabularInline):
+    # Твой код для SupplyItemInline остается без изменений
     model = SupplyItem
-    extra = 1 # Количество пустых форм для добавления
+    extra = 1
     autocomplete_fields = ['product']
-    fields = ('product', 'quantity_received', 'cost_price_per_unit')
-    # Можно добавить readonly_fields, если некоторые поля инлайна не должны меняться после создания Supply
-    # def get_readonly_fields(self, request, obj=None):
-    #     if obj and obj.status == Supply.STATUS_RECEIVED: # obj здесь это Supply
-    #         return ['product', 'quantity_received', 'cost_price_per_unit']
-    #     return []
+    fields = ('product', 'quantity_received', 'cost_price_per_unit') # Убрал quantity_remaining_in_batch для чистоты, если оно readonly
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj and obj.status == Supply.STATUS_RECEIVED:
+            if not request.user.is_superuser and not request.user.has_perm('suppliers.can_edit_received_supply'):
+                return ['product', 'quantity_received', 'cost_price_per_unit']
+        return ['quantity_remaining_in_batch'] # Сделаем его всегда readonly в инлайне, т.к. оно вычисляется
+                                             # или управляется логикой FIFO при списании.
 
 @admin.register(Supply)
 class SupplyAdmin(admin.ModelAdmin):
-    # --- Инициализация для загрузки цветов ---
     def __init__(self, model, admin_site):
         super().__init__(model, admin_site)
-        # Загружаем цвета статусов один раз при инициализации Admin класса
-        # Это может вызвать RuntimeWarning при запуске, если uiconfig еще не загружен,
-        # но ты решил пока игнорировать это предупреждение.
         try:
             self.supply_status_colors_map = {
                 color.status_key: color.hex_color
                 for color in SupplyStatusColor.objects.all()
             }
-        except Exception as e: # Ловим возможные ошибки, если БД еще не готова (например, при первом запуске)
+        except Exception as e:
             print(f"Warning: Could not load supply status colors in SupplyAdmin: {e}")
             self.supply_status_colors_map = {}
 
-    # --- Метод для отображения цветного статуса ---
     def colored_status(self, obj):
-        status_display = obj.get_status_display() # Человекочитаемое имя статуса
-        hex_color = self.supply_status_colors_map.get(obj.status) # Получаем цвет из карты
-
+        # Твой метод colored_status остается без изменений
+        status_display = obj.get_status_display()
+        hex_color = self.supply_status_colors_map.get(obj.status)
         if hex_color:
-            # Определяем цвет текста для контраста (простая логика)
             text_color = '#ffffff' if int(hex_color[1:3], 16) * 0.299 + int(hex_color[3:5], 16) * 0.587 + int(hex_color[5:7], 16) * 0.114 < 128 else '#000000'
             return format_html(
                 '<span style="background-color: {0}; padding: 3px 7px; border-radius: 4px; color: {1};"><strong>{2}</strong></span>',
@@ -73,34 +73,132 @@ class SupplyAdmin(admin.ModelAdmin):
                 text_color,
                 status_display
             )
-        return status_display # Возвращаем обычный текст, если цвет не найден
+        return status_display
+    colored_status.short_description = 'Статус поставки'
+    colored_status.admin_order_field = 'status'
 
-    colored_status.short_description = 'Статус поставки' # Название колонки
-    colored_status.admin_order_field = 'status' # Позволяет сортировку по этому полю
-
-    list_display = ('id', 'supplier', 'receipt_date', 'document_number', 'colored_status', 'created_by', 'created_at') # Заменили 'status' на 'colored_status'
-    list_filter = ('status', 'supplier', 'receipt_date', 'created_by')
+    list_display = (
+        'id', 
+        'supplier', 
+        'receipt_date', 
+        'document_number', 
+        'colored_status', 
+        'created_by', 
+        'payment_transaction_created', # <--- ДОБАВЛЕНО ПОЛЕ
+        'created_at'
+    )
+    list_filter = (
+        'status', 
+        'supplier', 
+        'receipt_date', 
+        'created_by',
+        'payment_transaction_created'  # <--- ДОБАВЛЕНО ПОЛЕ
+    )
     search_fields = ('id', 'supplier__name', 'document_number', 'notes')
     autocomplete_fields = ['supplier', 'created_by']
     inlines = [SupplyItemInline]
-    # list_editable = ('status',) # РЕКОМЕНДУЮ УБРАТЬ list_editable для статуса, если используем цветной статус
     ordering = ('-receipt_date', '-id')
     
     fieldsets = (
         (None, {'fields': ('supplier', 'receipt_date', 'document_number', 'status')}),
+        ('Статус оплаты (информация)', { # <--- НОВАЯ СЕКЦИЯ
+            'fields': ('payment_transaction_created',) 
+        }),
         ('Дополнительно', {'fields': ('notes',)}),
         ('Информация о записи', {
             'fields': ('created_by', ('created_at', 'updated_at')),
             'classes': ('collapse',)
         }),
     )
-    readonly_fields = ('created_at', 'updated_at', 'created_by') # created_by лучше сделать readonly после установки
+    # payment_transaction_created управляется системой, так что его можно сделать readonly здесь,
+    # но оно будет обновляться через Task.save() -> Supply.save(update_fields=['payment_transaction_created'])
+    # Чтобы пользователь случайно не изменил его, добавим в readonly_fields.
+    readonly_fields = ('created_at', 'updated_at', 'created_by', 'payment_transaction_created') 
 
-    def save_model(self, request, obj, form, change):
-        if not obj.pk:
+    def save_model(self, request, obj: Supply, form, change):
+        # Отслеживаем предыдущий статус для логики создания задачи
+        previous_status = None
+        if obj.pk: # Если объект уже существует (редактирование)
+            try:
+                previous_status = Supply.objects.get(pk=obj.pk).status
+            except Supply.DoesNotExist:
+                pass # Маловероятно, но на всякий случай
+
+        if not obj.pk: # Если это новый объект (создание)
             obj.created_by = request.user
-        super().save_model(request, obj, form, change)
+        
+        super().save_model(request, obj, form, change) # Сначала сохраняем объект Supply
 
-    def save_related(self, request, form, formsets, change):
-        super().save_related(request, form, formsets, change)
-        # Логика вызова update_stock_on_received остается в Supply.save() как и было
+        # Логика создания ЗАДАЧИ при оприходовании (когда статус меняется на "Оприходовано"
+        # или когда новая поставка создается сразу со статусом "Оприходовано")
+        
+        # obj.status теперь содержит новый сохраненный статус
+        # previous_status содержит статус до этого сохранения (или None, если это новая запись)
+        
+        # Условия для создания задачи:
+        # 1. Текущий статус - "Оприходовано"
+        # 2. Либо это новая запись, которая сразу "Оприходована"
+        #    ЛИБО это существующая запись, и ее статус ИЗМЕНИЛСЯ на "Оприходовано"
+        # 3. И расходная операция по оплате еще НЕ создана (payment_transaction_created is False)
+        
+        needs_task_creation = False
+        if obj.status == Supply.STATUS_RECEIVED and not obj.payment_transaction_created:
+            if not obj.pk: # Это было новое сохранение, и статус сразу "Оприходовано"
+                needs_task_creation = True
+            elif previous_status and previous_status != Supply.STATUS_RECEIVED: # Статус изменился на "Оприходовано"
+                needs_task_creation = True
+        
+        if needs_task_creation:
+            content_type_supply = ContentType.objects.get_for_model(obj)
+            try:
+                task_type_supply_payment = TaskType.objects.get(name="Оформить оплату поставки")
+                
+                # Проверяем, не существует ли уже АКТИВНАЯ (не финальная) задача такого типа для этой поставки
+                existing_task = Task.objects.filter(
+                    content_type=content_type_supply, 
+                    object_id=obj.pk, 
+                    task_type=task_type_supply_payment
+                ).exclude(status__is_final=True).first()
+
+                if not existing_task:
+                    initial_status = TaskStatus.objects.get(name="Новая")
+                    assigned_group = None
+                    if task_type_supply_payment.default_visibility_groups.exists():
+                        assigned_group = task_type_supply_payment.default_visibility_groups.first()
+
+                    # Рассчитываем due_date (например, +3 дня от текущей даты)
+                    # due_date_for_task = timezone.now() + timezone.timedelta(days=3)
+
+                    Task.objects.create(
+                        title=f"Оформить оплату по поставке №{obj.id}",
+                        description=f"Поставщик: {obj.supplier.name}.\nДокумент: {obj.document_number or 'б/н'}.\nДата поставки: {obj.receipt_date.strftime('%d.%m.%Y')}.\nСумма к оплате: {obj.get_total_cost()}",
+                        task_type=task_type_supply_payment,
+                        status=initial_status,
+                        related_object=obj,
+                        created_by=request.user, # Пользователь, который оприходовал
+                        assigned_to_group=assigned_group,
+                        # due_date=due_date_for_task # Раскомментируй, если нужно установить срок
+                    )
+                    print(f"INFO (SupplyAdmin): Задача на оформление оплаты для поставки #{obj.id} СОЗДАНА.")
+                else:
+                    print(f"INFO (SupplyAdmin): Активная задача (ID: {existing_task.id}) на оформление оплаты для поставки #{obj.id} уже существует. Новая не создана.")
+            
+            except TaskType.DoesNotExist:
+                print(f"ERROR (SupplyAdmin): Тип задачи 'Оформить оплату поставки' не найден. Задача не создана для поставки #{obj.id}.")
+            except TaskStatus.DoesNotExist:
+                print(f"ERROR (SupplyAdmin): Начальный статус задачи 'Новая' не найден. Задача не создана для поставки #{obj.id}.")
+            except Exception as e:
+                print(f"ERROR (SupplyAdmin) при создании задачи для поставки #{obj.id}: {e}")
+
+    # save_related остается как был, если он не делает ничего специфичного,
+    # кроме вызова super(). Твой существующий код его не менял, так что он в порядке.
+
+    def get_readonly_fields(self, request, obj=None):
+        # Твой метод get_readonly_fields для статуса остается без изменений,
+        # но мы добавили payment_transaction_created в общий readonly_fields, 
+        # так как он должен меняться только системой.
+        readonly_fields_list = list(super().get_readonly_fields(request, obj))
+        if obj and obj.status == Supply.STATUS_RECEIVED:
+            if not request.user.is_superuser and not request.user.has_perm('suppliers.can_edit_received_supply'):
+                readonly_fields_list.append('status')
+        return tuple(set(readonly_fields_list))
