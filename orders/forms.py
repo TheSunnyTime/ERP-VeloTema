@@ -1,36 +1,18 @@
 # F:\CRM 2.0\ERP\orders\forms.py
 from django import forms
 from django.core.exceptions import ValidationError
-from .models import Order # Импортируем Order для доступа к константам статуса
+from .models import Order, OrderType # Убедись, что OrderType импортирован
+
 # Если в BaseOrderProductItemFormSet используется модель Product, ее нужно импортировать:
-# from products.models import Product 
+# from products.models import Product
 
 class BaseOrderProductItemFormSet(forms.BaseInlineFormSet):
-    # Здесь твой существующий код для BaseOrderProductItemFormSet.
-    # Оставляю его без изменений, так как он не был предметом текущей проблемы.
-    def clean(self):
-        super().clean()
-        if not self.instance or not self.instance.pk: # self.instance это родительский Order
-            return
-
-        # Закомментированная логика проверки остатков (ты сказал, что пока полагаешься на OrderAdmin.save_related)
-        # product_quantities = {}
-        # for form in self.forms:
-        #     if not form.is_valid():
-        #         continue
-        #     if form.cleaned_data and not form.cleaned_data.get('DELETE', False):
-        #         product = form.cleaned_data.get('product')
-        #         quantity = form.cleaned_data.get('quantity')
-        #         if product and quantity is not None and quantity > 0:
-        #             product_quantities[product] = product_quantities.get(product, 0) + quantity
-        # if not product_quantities:
-        #     return
-        # print(f"[FormSet CLEAN Order {self.instance.pk}] Проверяем остатки (в формсете) для статуса '{self.instance.status}': {product_quantities}")
-        # all_forms_errors = []
-        # # ... (логика проверки и добавления ошибок в all_forms_errors) ...
-        # if all_forms_errors:
-        #     raise ValidationError(all_forms_errors)
-        pass # Если логики нет, можно просто pass
+    # ... (твой существующий код)
+    # Пример:
+    # def clean(self):
+    #     super().clean()
+    #     # какая-то логика, если нужна
+    pass
 
 
 # --- ФОРМА ДЛЯ OrderAdmin ---
@@ -39,37 +21,102 @@ class OrderAdminForm(forms.ModelForm):
         model = Order
         fields = '__all__' # Админка сама будет управлять отображением полей через fieldsets
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        instance = self.instance
+
+        # Логика определения is_repair_type и current_status
+        # (оставлена как в твоем коде, предполагает, что OrderType.TYPE_REPAIR определена в модели OrderType)
+        is_repair_type = False
+        current_status = None
+
+        if instance and instance.pk and instance.order_type:
+            if instance.order_type.name == OrderType.TYPE_REPAIR: # Используем константу из модели OrderType
+                is_repair_type = True
+        # Проверка self.data (отправленные данные формы)
+        elif self.data and 'order_type' in self.data:
+            try:
+                order_type_id = self.data.get('order_type')
+                if order_type_id: # Убедимся, что ID не пустой
+                    order_type_obj = OrderType.objects.get(pk=order_type_id)
+                    if order_type_obj.name == OrderType.TYPE_REPAIR:
+                        is_repair_type = True
+            except (OrderType.DoesNotExist, ValueError, TypeError): # Добавлен TypeError на случай если order_type_id невалиден для pk
+                pass
+        # Проверка self.initial (начальные данные для новой формы)
+        elif self.initial.get('order_type'):
+            try:
+                initial_order_type_id = self.initial.get('order_type')
+                if initial_order_type_id: # Убедимся, что ID не пустой
+                    order_type_obj = OrderType.objects.get(pk=initial_order_type_id)
+                    if order_type_obj.name == OrderType.TYPE_REPAIR:
+                        is_repair_type = True
+            except (OrderType.DoesNotExist, ValueError, TypeError):
+                pass
+
+        # Определение текущего статуса
+        if instance and instance.pk and instance.status:
+            current_status = instance.status
+        elif self.data and 'status' in self.data:
+            current_status = self.data.get('status')
+        elif self.initial.get('status'):
+            current_status = self.initial.get('status')
+        else: # Для нового заказа, если статус не передан, по умолчанию 'new'
+            current_status = Order.STATUS_NEW
+
+
+        if 'performer' in self.fields:
+            # Всегда устанавливаем required=False для поля формы,
+            # чтобы избежать стандартной ошибки Django "Это поле обязательно.".
+            # Наша основная валидация (с кастомным сообщением) будет в Order.clean().
+            # JavaScript отвечает за визуальное отображение обязательности (звездочка, HTML required).
+            self.fields['performer'].required = False
+
+            # Опционально: можно добавить CSS-класс для стилизации, если JS этого не делает
+            # или если нужно специальное отображение при серверной ошибке.
+            # if is_repair_type and current_status and current_status != Order.STATUS_NEW:
+            #     self.fields['performer'].widget.attrs.update({'class': 'conditionally-required-by-server'})
+
+
+    def clean_performer(self):
+        """
+        Вызывается для валидации поля 'performer' на уровне формы.
+        Мы просто возвращаем значение. Это помогает предотвратить
+        генерацию стандартной ошибки "Это поле обязательно", если
+        какой-то механизм Django все еще пытается ее вызвать, несмотря на
+        self.fields['performer'].required = False в __init__.
+        Основная логика валидации (обязательность в зависимости от типа/статуса)
+        находится в методе Order.clean().
+        """
+        return self.cleaned_data.get('performer')
+
     def clean(self):
         cleaned_data = super().clean()
         status = cleaned_data.get('status')
         payment_method = cleaned_data.get('payment_method_on_closure')
+        # order_type и performer здесь не используются для валидации исполнителя,
+        # так как эта логика перенесена в Order.clean() для централизации.
 
-        # self.instance.pk будет None для нового объекта (при создании)
-        # self.instance будет объектом Order при редактировании
-        is_new_object = not self.instance.pk 
+        is_new_object = not self.instance or not self.instance.pk
 
-        # 1. Проверка: Новый заказ не может быть сразу "Выдан"
-        # Эту проверку также выполняет get_form в OrderAdmin, убирая опцию "Выдан",
-        # но эта валидация - дополнительная защита на случай, если данные придут иначе.
+        # Валидация: Новый заказ не может быть сразу "Выдан"
         if is_new_object and status == Order.STATUS_ISSUED:
-            # Вызываем ValidationError, которая будет показана как не-полевая ошибка (вверху формы)
             raise ValidationError(
                 "Новый заказ не может быть сразу создан со статусом 'Выдан'. "
                 "Сначала сохраните заказ (например, со статусом 'Новый'), добавьте позиции, "
                 "затем укажите метод оплаты и измените статус на 'Выдан'."
-            )
+            ) # Эта ошибка будет не-полевой (non-field error)
 
-        # 2. Основная проверка: если статус "Выдан", метод оплаты должен быть указан
-        # Эта проверка актуальна и для новых (если предыдущий if не сработал) и для существующих.
+        # Валидация: Если статус "Выдан", метод оплаты должен быть указан
         if status == Order.STATUS_ISSUED and not payment_method:
-            # Добавляем ошибку к конкретному полю payment_method_on_closure
-            self.add_error('payment_method_on_closure', 
-                           ValidationError("Метод оплаты должен быть указан, если статус заказа 'Выдан'.", 
+            self.add_error('payment_method_on_closure',
+                           ValidationError("Метод оплаты должен быть указан, если статус заказа 'Выдан'.",
                                            code='payment_method_required_for_issue'))
-            # После add_error форма уже считается невалидной. 
-            # Дополнительно вызывать raise ValidationError для всей формы не нужно,
-            # если мы хотим, чтобы ошибка была привязана к полю.
 
-        # Здесь можно добавить другие комплексные валидации для формы заказа, если они понадобятся
-        
+        # Валидация для обязательности исполнителя (тип "Ремонт", статус не "Новый")
+        # теперь ПОЛНОСТЬЮ находится в Order.clean() в models.py.
+        # Это обеспечивает, что валидация происходит на уровне модели и сообщение об ошибке
+        # генерируется там (и должно быть привязано к полю 'performer' через словарь).
+        # Поэтому здесь мы не дублируем эту логику.
+
         return cleaned_data

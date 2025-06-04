@@ -157,17 +157,16 @@ class Task(models.Model):
             current_status_obj = TaskStatus.objects.get(pk=self.status_id)
             current_task_type_obj = TaskType.objects.get(pk=self.task_type_id)
 
-            # Ключевые статусы и тип для проверок
             status_ready_for_processing = TaskStatus.objects.get(name="Готово к выполнению")
             task_type_supply_payment = TaskType.objects.get(name="Оформить оплату поставки")
-            status_vyplnena = TaskStatus.objects.get(name="Выполнена") # Статус "Выполнена"
-            status_oshibka_vypolneniya = TaskStatus.objects.get(name="Ошибка выполнения") # Статус "Ошибка выполнения"
+            status_vyplnena = TaskStatus.objects.get(name="Выполнена")
+            status_oshibka_vypolneniya = TaskStatus.objects.get(name="Ошибка выполнения")
 
         except (TaskStatus.DoesNotExist, TaskType.DoesNotExist) as e:
             print(f"WARNING (Task.clean): Не найдены один или несколько ключевых статусов/типов для валидации: {e}")
             return
 
-        error_messages = [] # Собираем все ошибки валидации сюда
+        error_messages = [] 
 
         # Блок 1: Валидация для перехода в "Готово к выполнению"
         if current_task_type_obj == task_type_supply_payment and current_status_obj == status_ready_for_processing:
@@ -192,26 +191,19 @@ class Task(models.Model):
         if current_task_type_obj == task_type_supply_payment:
             is_attempting_manual_system_status_set = False
             
-            # Проверяем только для существующих задач (self.pk не None)
             if self.pk: 
                 try:
                     old_task_instance = Task.objects.get(pk=self.pk)
-                    old_status = old_task_instance.status # Статус до текущего изменения
-
+                    old_status = old_task_instance.status
+                    
                     # Если пытаются установить "Выполнена" или "Ошибка выполнения"
-                    if current_status_obj == status_vyplnena or current_status_obj == status_oshibka_vypolneniya:
-                        # И старый статус НЕ был "Готово к выполнению" (то есть это не системный переход)
-                        # И старый статус НЕ был таким же, как текущий (т.е. статус действительно меняется на системный)
+                    if current_status_obj == status_vyplnena or current_status_obj == status_oshibka_vypolneniya: # <--- ДОБАВЛЕНА ПРОВЕРКА НА "Ошибка выполнения"
                         if old_status != status_ready_for_processing and old_status != current_status_obj:
                             is_attempting_manual_system_status_set = True
-                
                 except Task.DoesNotExist:
-                    pass # Это новая задача, проверка не нужна
-
-            # Если это новая задача, и ей сразу пытаются присвоить системный статус
-            elif not self.pk and (current_status_obj == status_vyplnena or current_status_obj == status_oshibka_vypolneniya):
+                    pass 
+            elif not self.pk and (current_status_obj == status_vyplnena or current_status_obj == status_oshibka_vypolneniya): # <--- И ЗДЕСЬ
                  is_attempting_manual_system_status_set = True
-
 
             if is_attempting_manual_system_status_set:
                 error_messages.append(

@@ -2,6 +2,7 @@ from django.contrib import admin
 from .models import OrderStatusColor
 from django.utils.html import format_html # Для отображения цвета
 from uiconfig.models import SupplyStatusColor
+from .models import TaskStatusColor
 
 @admin.register(OrderStatusColor)
 class OrderStatusColorAdmin(admin.ModelAdmin):
@@ -62,3 +63,21 @@ class SupplyStatusColorAdmin(admin.ModelAdmin):
     #     return request.user.has_perm('uiconfig.add_supplystatuscolor') or request.user.is_superuser
     # def has_delete_permission(self, request, obj=None):
     #     return request.user.has_perm('uiconfig.delete_supplystatuscolor') or request.user.is_superuser
+
+@admin.register(TaskStatusColor)
+class TaskStatusColorAdmin(admin.ModelAdmin):
+    list_display = ('get_status_name_for_admin_display', 'hex_color', 'display_color_preview_admin')
+    list_editable = ('hex_color',)
+    search_fields = ('task_status__name',) 
+    autocomplete_fields = ['task_status'] 
+    fields = ('task_status', 'hex_color') 
+
+    def display_color_preview_admin(self, obj):
+        if obj.hex_color:
+            return format_html(
+                '<div style="width: 50px; height: 20px; background-color: {}; border: 1px solid #ccc;"></div>',
+                obj.hex_color
+            )
+        return "Нет цвета"
+    display_color_preview_admin.short_description = "Предпросмотр цвета"
+    # Не забудь, что метод get_status_name_for_admin_display должен быть в модели TaskStatusColor

@@ -41,8 +41,7 @@ class OrderAdmin(admin.ModelAdmin):
         'get_total_order_amount_display' 
     )
     list_filter = (
-        'status', 'order_type', 'created_at', 'manager', 'performer', 'client', 
-        'payment_method_on_closure', 'target_cash_register'
+        'status', 'order_type', 'created_at', 'manager', 'performer',
     )
     search_fields = ( # Убедись, что это поле не пустое
         'id', 'client__name', 'manager__username', 'manager__first_name', 
