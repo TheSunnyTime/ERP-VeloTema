@@ -6,19 +6,19 @@ from django.db import transaction
 from django.db.models import F
 from decimal import Decimal, ROUND_HALF_UP
 from django.contrib.contenttypes.models import ContentType
-from django.urls import reverse # Убедись, что reverse импортирован
+from django.urls import reverse
 from django.utils import timezone
-from django.utils.html import format_html # Убедись, что format_html импортирован
+from django.utils.html import format_html
 from uiconfig.models import OrderStatusColor
 
-from ..models import Order, OrderType # OrderType используется для констант
+from ..models import Order, OrderType
 from ..forms import OrderAdminForm
 from ..fifo_logic import calculate_and_assign_fifo_cost
 
 from .order_inlines_admin import OrderProductItemInline, OrderServiceItemInline
 
 from salary_management.models import EmployeeRate, SalaryCalculation, SalaryCalculationDetail, ProductSalaryDetail
-from utils.models import DocumentTemplate
+from utils.models import DocumentTemplate # Убедись, что импорт есть
 from products.models import Product
 from cash_register.models import CashRegister, CashTransaction
 
@@ -28,7 +28,7 @@ class OrderAdmin(admin.ModelAdmin):
     form = OrderAdminForm
     list_display = (
         'id',
-        'display_client_with_phone', # Используем наш кастомный метод
+        'display_client_with_phone',
         'display_manager_name',
         'display_performer_name',
         'order_type',
@@ -39,33 +39,33 @@ class OrderAdmin(admin.ModelAdmin):
     )
     list_filter = (
         'status', 'order_type', 'created_at', 'manager', 'performer',
-        'client', 
+        'client',
     )
     search_fields = (
-        'id', 
-        'client__name', 
-        'client__phone', # <--- ИЗМЕНЕНО: Поиск по полю 'phone' клиента
+        'id',
+        'client__name',
+        'client__phone',
         'manager__username', 'manager__first_name',
         'performer__username', 'performer__first_name', 'notes', 'order_type__name'
     )
     autocomplete_fields = ['manager', 'performer', 'client',]
     inlines = [OrderProductItemInline, OrderServiceItemInline]
-    # change_form_template = 'admin/orders/order/change_form_with_documents.html' # Как в твоем коде
+    change_form_template = 'admin/orders/order/change_form_with_documents.html' # <--- РАСКОММЕНТИРОВАНО
 
     def __init__(self, model, admin_site):
+        # ... (код без изменений) ...
         super().__init__(model, admin_site)
         self.status_colors_map = {
             color_setting.status_key: color_setting.hex_color
             for color_setting in OrderStatusColor.objects.all()
         }
 
-    # --- Метод для отображения клиента с телефоном в списке ---
     def display_client_with_phone(self, obj):
+        # ... (код без изменений) ...
         if obj.client:
-            client_name = str(obj.client) 
-            phone_to_display = obj.client.phone # <--- ИЗМЕНЕНО: Используем поле 'phone'
-
-            if phone_to_display: # Проверяем, есть ли значение в obj.client.phone
+            client_name = str(obj.client)
+            phone_to_display = obj.client.phone
+            if phone_to_display:
                 client_url = reverse('admin:clients_client_change', args=[obj.client.pk])
                 return format_html('<a href="{}">{} ({})</a>', client_url, client_name, phone_to_display)
             else:
@@ -73,10 +73,10 @@ class OrderAdmin(admin.ModelAdmin):
                 return format_html('<a href="{}">{}</a>', client_url, client_name)
         return "N/A"
     display_client_with_phone.short_description = "Клиент (телефон)"
-    display_client_with_phone.admin_order_field = 'client' 
+    display_client_with_phone.admin_order_field = 'client'
 
-    # --- Остальные твои методы ---
     def display_manager_name(self, obj):
+        # ... (код без изменений) ...
         if obj.manager:
             return obj.manager.first_name if obj.manager.first_name else obj.manager.username
         return "N/A"
@@ -84,6 +84,7 @@ class OrderAdmin(admin.ModelAdmin):
     display_manager_name.admin_order_field = 'manager__first_name'
 
     def display_performer_name(self, obj):
+        # ... (код без изменений) ...
         if obj.performer:
             return obj.performer.first_name if obj.performer.first_name else obj.performer.username
         return "N/A"
@@ -91,11 +92,13 @@ class OrderAdmin(admin.ModelAdmin):
     display_performer_name.admin_order_field = 'performer__first_name'
 
     def get_total_order_amount_display(self, obj):
+        # ... (код без изменений) ...
         if obj.pk: return obj.calculate_total_amount()
         return Decimal('0.00')
     get_total_order_amount_display.short_description = "Общая сумма заказа"
 
     def colored_status(self, obj):
+        # ... (код без изменений) ...
         status_key = obj.status
         display_name = obj.get_status_display()
         hex_color = self.status_colors_map.get(status_key, '#FFFFFF')
@@ -113,6 +116,7 @@ class OrderAdmin(admin.ModelAdmin):
     colored_status.admin_order_field = 'status'
 
     def get_fieldsets(self, request, obj=None):
+        # ... (код без изменений) ...
         main_fields_tuple = ('client', 'manager', 'performer', 'order_type', 'repaired_item', 'status', 'notes')
         payment_closure_fieldset_fields = ['payment_method_on_closure']
         if request.user.is_superuser or request.user.has_perm('orders.can_view_target_cash_register'):
@@ -137,6 +141,7 @@ class OrderAdmin(admin.ModelAdmin):
             return fieldsets_config_new
 
     def get_readonly_fields(self, request, obj=None):
+        # ... (код без изменений) ...
         base_readonly = ['created_at', 'updated_at', 'get_total_order_amount_display']
         db_obj = None
         if obj and obj.pk:
@@ -157,6 +162,7 @@ class OrderAdmin(admin.ModelAdmin):
         return tuple(set(base_readonly))
 
     def get_form(self, request, obj=None, **kwargs):
+        # ... (код без изменений) ...
         if obj and obj.pk:
             try:
                 db_instance = Order.objects.get(pk=obj.pk)
@@ -177,6 +183,7 @@ class OrderAdmin(admin.ModelAdmin):
         return form
 
     def _get_or_create_salary_calculation(self, request, order_instance, employee, role_context_key, role_verbose_name):
+        # ... (код без изменений) ...
         salary_calc_obj, calc_created = SalaryCalculation.objects.get_or_create(
             employee=employee, order=order_instance, role_context=role_context_key,
             defaults={
@@ -192,6 +199,7 @@ class OrderAdmin(admin.ModelAdmin):
         return salary_calc_obj, calc_created, was_preexisting_with_amount
 
     def save_model(self, request, obj, form, change):
+        # ... (код без изменений) ...
         previous_status_in_db_before_save = None
         if obj.pk:
             try:
@@ -207,6 +215,7 @@ class OrderAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
     def save_related(self, request, form, formsets, change):
+        # ... (код без изменений, предполагаем, что он корректен и не вызывает проблем с отображением ошибок формы) ...
         super().save_related(request, form, formsets, change)
         order_instance = form.instance
         original_order_type_before_determination = order_instance.order_type
@@ -291,7 +300,7 @@ class OrderAdmin(admin.ModelAdmin):
                                 base_amount = service_item.get_item_total()
                                 if base_amount is not None and base_amount > Decimal('0.00'):
                                     earned_from_service = (base_amount * (employee_rate_instance.service_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                                    if earned_from_service > Decimal('0.00'): SalaryCalculationDetail.objects.create(salary_calculation=salary_calc_obj, order_service_item=service_item, source_description=service_item.service.name, base_amount_for_calc=base_amount, applied_percentage=employee_rate_instance.service_percentage, earned_amount=earned_from_service, detail_type=f"service_{role_key_for_rate}"); current_session_earned_total_for_role += earned_from_profit
+                                    if earned_from_service > Decimal('0.00'): SalaryCalculationDetail.objects.create(salary_calculation=salary_calc_obj, order_service_item=service_item, source_description=service_item.service.name, base_amount_for_calc=base_amount, applied_percentage=employee_rate_instance.service_percentage, earned_amount=earned_from_service, detail_type=f"service_{role_key_for_rate}"); current_session_earned_total_for_role += earned_from_service
                         if current_session_earned_total_for_role > Decimal('0.00') or sc_created or (not sc_created and sc_preexisting_non_zero_calc and salary_calc_obj.total_calculated_amount != current_session_earned_total_for_role):
                             salary_calc_obj.total_calculated_amount = current_session_earned_total_for_role.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                             rule_parts = []; service_details_exist = salary_calc_obj.service_details.filter(earned_amount__gt=0).exists(); product_details_exist = salary_calc_obj.product_profit_details.filter(earned_amount__gt=0).exists()
@@ -318,19 +327,26 @@ class OrderAdmin(admin.ModelAdmin):
                 else: messages.error(request, f"Ошибка при выдаче заказа №{order_instance.id}: {str(e)}")
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
+        # Убираем отладочный print отсюда
         original_extra_context = extra_context.copy() if extra_context else {}
         order = self.get_object(request, object_id)
         if order:
             try:
                 order_content_type = ContentType.objects.get_for_model(order)
-                available_templates = DocumentTemplate.objects.filter(document_type__related_model=order_content_type, is_active=True)
+                available_templates = DocumentTemplate.objects.filter(
+                    document_type__related_model=order_content_type,
+                    is_active=True
+                )
                 original_extra_context['available_document_templates'] = available_templates
                 original_extra_context['current_object_id'] = object_id
                 original_extra_context['current_order_status_is_issued'] = (order.status == Order.STATUS_ISSUED)
             except ContentType.DoesNotExist:
-                original_extra_context['available_document_templates'] = None; messages.warning(request, "Не удалось определить тип контента для Заказа.")
+                original_extra_context['available_document_templates'] = None
+                messages.warning(request, "Не удалось определить тип контента для Заказа.")
             except Exception as e:
-                original_extra_context['available_document_templates'] = None; messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
+                original_extra_context['available_document_templates'] = None
+                messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
+        
         return super().change_view(request, object_id, form_url, extra_context=original_extra_context)
 
 
