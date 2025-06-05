@@ -22,6 +22,7 @@ class Client(models.Model):
         max_length=255,
         verbose_name="ФИО или Название компании клиента"
     )
+    phone_number = models.CharField(max_length=20, blank=True, null=True, verbose_name="Номер телефона") # <--- ДОБАВЬ ЭТО ПОЛЕ
     contact_person = models.CharField(
         max_length=255,
         blank=True, null=True,
