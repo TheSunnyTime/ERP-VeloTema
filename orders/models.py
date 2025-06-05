@@ -41,13 +41,15 @@ class Service(models.Model):
 class Order(models.Model):
     STATUS_NEW = 'new'
     STATUS_IN_PROGRESS = 'in_progress'
-    STATUS_READY = 'ready'
     STATUS_DELIVERING = 'delivering'  # <--- НОВЫЙ СТАТУС (ключ)
+    STATUS_READY = 'ready'
+    STATUS_AWAITING = 'awaiting'        # <--- НОВЫЙ СТАТУС (ключ)
     STATUS_ISSUED = 'issued'
     STATUS_CANCELLED = 'cancelled'
     STATUS_CHOICES = [
         (STATUS_NEW, 'Новый'),
         (STATUS_IN_PROGRESS, 'В работе'),
+        (STATUS_AWAITING, 'Ожидается'),   # <--- НОВЫЙ СТАТУС (отображение)
         (STATUS_READY, 'Готов'),
         (STATUS_DELIVERING, 'В доставке'), # <--- НОВЫЙ СТАТУС (отображение)
         (STATUS_ISSUED, 'Выдан'),
