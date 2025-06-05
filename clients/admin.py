@@ -9,9 +9,40 @@ class ClientGroupAdmin(admin.ModelAdmin):
 
 @admin.register(Client) # Регистрируем модель Client
 class ClientAdmin(admin.ModelAdmin):
-    list_display = ('name', 'client_group', 'phone', 'email', 'contact_person', 'created_at') # Поля в списке клиентов
-    list_filter = ('client_group', 'created_at') # Фильтры сбоку
-    search_fields = ('name', 'phone', 'email', 'contact_person', 'notes') # Поля для поиска
-    autocomplete_fields = ('client_group',) # Делает выбор группы удобнее, если групп много
-    # fieldsets - можно использовать для группировки полей на странице редактирования, если нужно
-    # readonly_fields = ('created_at',) # Если дату создания не нужно редактировать
+    # В list_display можно оставить contact_person, если ты хочешь видеть его в общем списке клиентов,
+    # но не на форме редактирования. Если не хочешь видеть и в списке, удали и отсюда.
+    list_display = ('name', 'client_group', 'phone', 'email', 'contact_person', 'created_at') 
+    list_filter = ('client_group', 'created_at') 
+    # В search_fields можно оставить contact_person, если хочешь по нему искать,
+    # даже если его нет на форме. Если не хочешь, удали.
+    search_fields = ('name', 'phone', 'email', 'contact_person', 'notes') 
+    autocomplete_fields = ('client_group',) 
+    
+    # --- ДОБАВЛЯЕМ ЭТОТ БЛОК ---
+    # Явно указываем поля, которые должны отображаться на форме редактирования/добавления.
+    # Поле 'contact_person' здесь НЕ указано, поэтому оно не будет отображаться на форме.
+    fields = (
+        'name', 
+        'phone', 
+        'email', 
+        'address', 
+        'client_group', 
+        'notes',
+        # 'created_at' # Это поле обычно делается readonly, см. ниже
+    )
+    # Поле 'created_at' обычно не редактируется вручную, делаем его readonly.
+    # Если оно есть в 'fields', оно будет показано. Если нет, то нет.
+    # Если хочешь видеть, но не редактировать:
+    readonly_fields = ('created_at',) 
+    # И тогда его нужно добавить в fields или fieldsets, если используешь fieldsets.
+    # Если используешь fields и хочешь видеть created_at:
+    # fields = ('name', 'phone', 'email', 'address', 'client_group', 'notes', 'created_at')
+    # --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+    # Если ты используешь Inputmask для поля 'phone', не забудь класс Media (если он нужен здесь):
+    # class Media:
+    #     js = (
+    #         'admin/js/jquery.init.js',
+    #         'js/vendor/jquery.inputmask.min.js', 
+    #         'js/client_phone_mask.js',       
+    #     )
