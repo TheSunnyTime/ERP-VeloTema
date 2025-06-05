@@ -1,18 +1,18 @@
 # F:\CRM 2.0\erp\orders\admin\order_admin.py
 from django.contrib import admin, messages
-from django.contrib.auth.models import User, Group
-from django.core.exceptions import PermissionDenied, ValidationError
+# from django.contrib.auth.models import User, Group # User, Group не используются напрямую
+from django.core.exceptions import ValidationError # PermissionDenied не используется
 from django.db import transaction
 from django.db.models import F
 from decimal import Decimal, ROUND_HALF_UP
 from django.contrib.contenttypes.models import ContentType
-from django.urls import reverse
+# from django.urls import reverse # Не используется напрямую здесь
 from django.utils import timezone
 from django.utils.html import format_html
 from uiconfig.models import OrderStatusColor
 
-from ..models import Order, OrderType # OrderType используется для констант
-from ..forms import OrderAdminForm
+from ..models import Order, OrderType
+from ..forms import OrderAdminForm # OrderAdminForm импортируется
 from ..fifo_logic import calculate_and_assign_fifo_cost
 
 from .order_inlines_admin import OrderProductItemInline, OrderServiceItemInline
@@ -44,9 +44,9 @@ class OrderAdmin(admin.ModelAdmin):
         'id', 'client__name', 'manager__username', 'manager__first_name',
         'performer__username', 'performer__first_name', 'notes', 'order_type__name'
     )
-    autocomplete_fields = ['manager', 'performer', 'client',] # Восстановлен 'performer'
+    autocomplete_fields = ['manager', 'performer', 'client',]
     inlines = [OrderProductItemInline, OrderServiceItemInline]
-    # change_form_template = 'admin/orders/order/change_form_with_documents.html' # Оставлено закомментированным, как у тебя
+    change_form_template = 'admin/orders/order/change_form_with_documents.html'
 
     def __init__(self, model, admin_site):
         super().__init__(model, admin_site)
@@ -119,44 +119,38 @@ class OrderAdmin(admin.ModelAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         base_readonly = ['created_at', 'updated_at', 'get_total_order_amount_display']
-        
         db_obj = None
         if obj and obj.pk:
             try:
                 db_obj = self.model.objects.get(pk=obj.pk)
             except self.model.DoesNotExist:
-                db_obj = obj 
+                db_obj = obj
         else:
-            db_obj = obj 
-
+            db_obj = obj
         obj_to_check_status = db_obj if db_obj else obj
-
         if obj_to_check_status and obj_to_check_status.pk:
             can_edit_order_manager_group_name = "Редакторы ответственных в заказах"
             user_can_edit_manager = request.user.is_superuser or \
                                     request.user.groups.filter(name=can_edit_order_manager_group_name).exists()
             if not user_can_edit_manager:
                 base_readonly.append('manager')
-            
             if obj_to_check_status.status == Order.STATUS_ISSUED:
-                base_readonly.extend(['status', 'payment_method_on_closure', 'client', 
+                base_readonly.extend(['status', 'payment_method_on_closure', 'client',
                                       'manager', 'performer', 'order_type'])
             else:
                 if not request.user.has_perm('orders.can_change_order_type_dynamically'):
                     base_readonly.append('order_type')
-        else: 
+        else:
             base_readonly.extend(['status', 'order_type', 'payment_method_on_closure', 'target_cash_register'])
-        
         return tuple(set(base_readonly))
 
     def get_form(self, request, obj=None, **kwargs):
-        # ... (код остался без изменений, он корректен) ...
         if obj and obj.pk:
             try:
                 db_instance = Order.objects.get(pk=obj.pk)
                 setattr(request, '_current_order_previous_status_from_db', db_instance.status)
             except Order.DoesNotExist:
-                setattr(request, '_current_order_previous_status_from_db', Order.STATUS_NEW if not obj.pk else obj.status)
+                setattr(request, '_current_order_previous_status_from_db', obj.status if obj else Order.STATUS_NEW)
         else:
             setattr(request, '_current_order_previous_status_from_db', Order.STATUS_NEW)
         form = super().get_form(request, obj, **kwargs)
@@ -166,13 +160,11 @@ class OrderAdmin(admin.ModelAdmin):
                 form.base_fields['status'].choices = new_status_choices
                 form.base_fields['status'].initial = Order.STATUS_NEW
             if 'manager' in form.base_fields:
-                form.base_fields['manager'].widget = admin.widgets.HiddenInput()
+                form.base_fields['manager'].widget = admin.widgets.HiddenInput() # ИСПРАВЛЕНО
                 form.base_fields['manager'].required = False
         return form
 
-
     def _get_or_create_salary_calculation(self, request, order_instance, employee, role_context_key, role_verbose_name):
-        # ... (код остался без изменений, он корректен) ...
         salary_calc_obj, calc_created = SalaryCalculation.objects.get_or_create(
             employee=employee, order=order_instance, role_context=role_context_key,
             defaults={
@@ -187,55 +179,38 @@ class OrderAdmin(admin.ModelAdmin):
             was_preexisting_with_amount = True
         return salary_calc_obj, calc_created, was_preexisting_with_amount
 
-
     def save_model(self, request, obj, form, change):
-        # ... (код остался без изменений, он корректен) ...
         previous_status_in_db_before_save = None
-        if obj.pk:
+        if obj.pk and change:
             try:
                 previous_status_in_db_before_save = Order.objects.get(pk=obj.pk).status
             except Order.DoesNotExist:
-                previous_status_in_db_before_save = Order.STATUS_NEW if not change else None
-        else:
+                previous_status_in_db_before_save = obj.status
+        elif not change:
             previous_status_in_db_before_save = Order.STATUS_NEW
-        setattr(request, '_current_order_previous_status_from_db_for_save_related', previous_status_in_db_before_save)
-        if not change:
             if not obj.manager_id:
                 obj.manager = request.user
+        setattr(request, '_current_order_previous_status_from_db_for_save_related', previous_status_in_db_before_save)
         super().save_model(request, obj, form, change)
 
-
     def save_related(self, request, form, formsets, change):
-        # Восстанавливаем оригинальную логику, убираем отладочные print'ы
         super().save_related(request, form, formsets, change)
-
         order_instance = form.instance
-        
         original_order_type_before_determination = order_instance.order_type
         if order_instance.determine_and_set_order_type():
             if order_instance.order_type != original_order_type_before_determination:
                 order_instance.updated_at = timezone.now()
                 order_instance.save(update_fields=['order_type', 'updated_at'])
                 messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
-
         previous_status_from_db = getattr(request, '_current_order_previous_status_from_db_for_save_related', None)
         current_status_in_object = order_instance.status
-
         is_newly_issued = (
             order_instance.pk is not None and
             current_status_in_object == Order.STATUS_ISSUED and
             previous_status_from_db != Order.STATUS_ISSUED
         )
-
         if is_newly_issued:
-            # print(f"[OrderAdmin SAVE_RELATED {order_instance.id}] Статус изменен на 'Выдан'. ...") # Убран print
             try:
-                # Валидации на payment_method_on_closure и performer теперь должны полностью
-                # обрабатываться в Order.clean() и OrderAdminForm.clean() ДО этого момента.
-                # Если форма прошла is_valid(), значит эти поля корректны.
-                # Проверки на существование касс и сумму заказа > 0 можно оставить здесь,
-                # так как они относятся к операционной логике выдачи, а не к валидности данных формы.
-
                 determined_cash_register = None
                 if order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CASH:
                     try: determined_cash_register = CashRegister.objects.get(is_default_for_cash=True, is_active=True)
@@ -245,54 +220,40 @@ class OrderAdmin(admin.ModelAdmin):
                     try: determined_cash_register = CashRegister.objects.get(is_default_for_card=True, is_active=True)
                     except CashRegister.DoesNotExist: raise ValidationError("Не найдена активная касса по умолчанию для КАРТ.")
                     except CashRegister.MultipleObjectsReturned: raise ValidationError("Найдено несколько активных касс по умолчанию для КАРТ.")
-                
-                if not determined_cash_register: # Эта проверка должна сработать, если кассы не найдены
+                if not determined_cash_register:
                     raise ValidationError(f"Не удалось автоматически определить кассу для метода '{order_instance.get_payment_method_on_closure_display()}'.")
-
                 current_order_total = order_instance.calculate_total_amount()
                 if not (current_order_total > Decimal('0.00')):
                     raise ValidationError(f"Сумма заказа ({current_order_total}) должна быть > 0 для выдачи.")
-
                 with transaction.atomic():
-                    # print(f"[OrderAdmin SAVE_RELATED {order_instance.id}] Внутри transaction.atomic()...") # Убран print
-                    
                     for order_item_instance in order_instance.product_items.all():
                         try:
-                            calculate_and_assign_fifo_cost(order_item_instance) 
-                            order_item_instance.save(update_fields=['cost_price_at_sale']) 
+                            calculate_and_assign_fifo_cost(order_item_instance)
+                            order_item_instance.save(update_fields=['cost_price_at_sale'])
                         except ValidationError as e_fifo:
-                            # Ошибку FIFO лучше перехватывать и показывать как не-полевую,
-                            # так как она не относится к конкретному полю формы заказа.
                             raise ValidationError(f"Ошибка FIFO для товара '{order_item_instance.product.name}': {str(e_fifo)}")
-                    
                     for item_to_update_stock in order_instance.product_items.all():
                         product_to_update = Product.objects.select_for_update().get(pk=item_to_update_stock.product.pk)
                         if product_to_update.stock_quantity < item_to_update_stock.quantity:
                             raise ValidationError(f"Недостаточно общего остатка товара '{product_to_update.name}' на складе. Доступно: {product_to_update.stock_quantity}, Требуется: {item_to_update_stock.quantity}.")
-                        
                         product_to_update.stock_quantity = F('stock_quantity') - item_to_update_stock.quantity
-                        update_fields_for_product = ['stock_quantity']
-                        if hasattr(product_to_update, 'updated_at'):
-                            update_fields_for_product.append('updated_at')
+                        update_fields_for_product = ['stock_quantity', 'updated_at'] if hasattr(product_to_update, 'updated_at') else ['stock_quantity']
+                        if 'updated_at' in update_fields_for_product: product_to_update.updated_at = timezone.now()
                         product_to_update.save(update_fields=update_fields_for_product)
-                    
                     order_instance.target_cash_register = determined_cash_register
                     order_instance.updated_at = timezone.now()
-                    order_instance.save(update_fields=['target_cash_register', 'updated_at']) 
-
+                    order_instance.save(update_fields=['target_cash_register', 'updated_at'])
                     if not CashTransaction.objects.filter(order=order_instance, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME).exists():
                         CashTransaction.objects.create(
                             cash_register=order_instance.target_cash_register,
                             transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME,
                             payment_method=order_instance.payment_method_on_closure,
                             amount=current_order_total,
-                            employee=order_instance.manager, 
+                            employee=order_instance.manager,
                             order=order_instance,
                             description=f"Оплата по заказу №{order_instance.id} (статус Выдан)"
                         )
-                    
                     # --- БЛОК РАСЧЕТА ЗАРПЛАТЫ ---
-                    # ... (твой блок расчета зарплаты без изменений) ...
                     earners_to_process = []
                     if order_instance.manager: earners_to_process.append({'employee_obj': order_instance.manager, 'role_key_for_rate': EmployeeRate.ROLE_MANAGER, 'role_verbose': 'Менеджер', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_MANAGER})
                     if order_instance.performer: earners_to_process.append({'employee_obj': order_instance.performer, 'role_key_for_rate': EmployeeRate.ROLE_PERFORMER, 'role_verbose': 'Исполнитель', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_PERFORMER})
@@ -331,35 +292,23 @@ class OrderAdmin(admin.ModelAdmin):
                             messages.success(request, f"Зарплата для {employee} (Роль: {role_verbose_name}) по заказу #{order_instance.id} начислена/обновлена: {salary_calc_obj.total_calculated_amount} руб.")
                         elif not sc_created and not sc_preexisting_non_zero_calc and current_session_earned_total_for_role == Decimal('0.00'): messages.info(request, f"Для {employee} (Роль: {role_verbose_name}) по заказу #{order_instance.id} в этой сессии начислений не произведено.")
                     if any_salary_calculated_this_session: order_instance.updated_at = timezone.now(); order_instance.save(update_fields=['updated_at'])
-
             except ValidationError as e:
-                # Отладочный блок УБРАН, так как ошибки валидации данных формы
-                # должны обрабатываться ДО save_related.
-                # Если ошибка возникает здесь, она будет не-полевой.
-                
-                # Восстанавливаем статус в памяти объекта, если он был изменен
                 if previous_status_from_db and order_instance.status != previous_status_from_db:
                     order_instance.status = previous_status_from_db
-                
-                # Показываем сообщение об ошибке пользователю
                 if hasattr(e, 'message_dict'):
                     for field_name, error_list in e.message_dict.items():
                         for single_error_message in error_list:
-                            # Для ошибок, привязанных к полям, они должны были быть показаны формой.
-                            # Здесь мы можем показать их как общие сообщения, если они не были отображены.
-                            messages.error(request, f"Ошибка (поле: {field_name}): {single_error_message}")
+                            label_text = field_name
+                            if field_name in form.fields:
+                                label_text = form.fields[field_name].label if form.fields[field_name].label else field_name
+                            messages.error(request, f"Ошибка ({label_text if field_name != '__all__' else 'Общая'}): {single_error_message}")
                 elif hasattr(e, 'messages') and isinstance(e.messages, list):
                     for single_error_message in e.messages:
                          messages.error(request, f"Ошибка: {single_error_message}")
                 else:
                     messages.error(request, f"Ошибка при выдаче заказа №{order_instance.id}: {str(e)}")
-                
-                # Важно: Транзакция откатится автоматически, если ValidationError возникнет внутри with transaction.atomic().
-                # Если ошибка возникла до with transaction.atomic(), то изменения в order_instance
-                # не должны быть сохранены, так как form.is_valid() должен был вернуть False.
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
-        # Убираем отладочный print отсюда
         original_extra_context = extra_context.copy() if extra_context else {}
         order = self.get_object(request, object_id)
         if order:
@@ -378,7 +327,6 @@ class OrderAdmin(admin.ModelAdmin):
             except Exception as e:
                 original_extra_context['available_document_templates'] = None
                 messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
-        
         return super().change_view(request, object_id, form_url, extra_context=original_extra_context)
 
     class Media:
