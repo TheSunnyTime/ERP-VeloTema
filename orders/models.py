@@ -3,7 +3,7 @@ from django.db import models
 from django.db import transaction # Оставляем, если предполагается использование
 from django.conf import settings
 from django.core.exceptions import ValidationError
-# from django.utils import timezone # Не используется напрямую здесь
+from django.utils import timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from products.models import Product
@@ -103,6 +103,14 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
     notes = models.TextField(blank=True, null=True, verbose_name="Примечания к заказу")
+
+        # НОВОЕ ПОЛЕ ДЛЯ СРОКА ВЫПОЛНЕНИЯ
+    due_date = models.DateField(
+        verbose_name="Срок выполнения до",
+        null=True,
+        blank=True, # blank=True, если не хотим обязательности на уровне формы, null=True для БД
+        help_text="Плановая дата, до которой заказ должен быть выполнен."
+    )
 
     _previous_status = None
 

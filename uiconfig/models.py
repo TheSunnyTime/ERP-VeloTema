@@ -3,6 +3,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 import re # Для валидации HEX-кода
 from django.utils.html import format_html
+from django.core.validators import RegexValidator
 
 # Импорты моделей, с которыми есть ForeignKey или OneToOneField
 from suppliers.models import Supply 
@@ -120,3 +121,69 @@ class TaskStatusColor(models.Model):
         return self.task_status.name if self.task_status else "Статус не выбран"
     get_status_name_for_admin_display.short_description = "Статус задачи"
     get_status_name_for_admin_display.admin_order_field = 'task_status__name'
+
+class OrderDueDateColorRule(models.Model):
+    OPERATOR_LTE = 'lte'  # Меньше или равно ( <= days_threshold )
+    OPERATOR_GTE = 'gte'  # Больше или равно ( >= days_threshold )
+    OPERATOR_EQ = 'eq'    # Равно ( == days_threshold )
+
+    COMPARISON_OPERATOR_CHOICES = [
+        (OPERATOR_LTE, 'Осталось/Просрочено дней <= Порога'), # Если порог отриц. - просрочено, положит. - осталось
+        (OPERATOR_GTE, 'Осталось/Просрочено дней >= Порога'),
+        (OPERATOR_EQ, 'Осталось/Просрочено дней == Порогу'),
+    ]
+
+    name = models.CharField(max_length=100, verbose_name="Название правила (для админки)")
+    days_threshold = models.IntegerField(
+        verbose_name="Порог (дней)",
+        help_text=(
+            "Количество дней относительно СЕГОДНЯШНЕЙ ДАТЫ. "
+            "Положительное: осталось N дней до срока. "
+            "0: срок сегодня. "
+            "Отрицательное: просрочено на N дней (например, -1 для 'просрочено на 1 день')."
+        )
+    )
+    operator = models.CharField(
+        max_length=10,
+        choices=COMPARISON_OPERATOR_CHOICES,
+        default=OPERATOR_LTE,
+        verbose_name="Оператор сравнения для 'дней до срока'"
+    )
+    hex_color = models.CharField(
+        max_length=7,
+        validators=[RegexValidator(regex=r'^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$', message="Введите корректный HEX-код цвета (например, #RRGGBB)")],
+        verbose_name="HEX-код цвета",
+        default="#FFFFFF"
+    )
+    priority = models.PositiveIntegerField(
+        default=10,
+        verbose_name="Приоритет",
+        help_text="Меньшее значение означает более высокий приоритет. Правила с одинаковым приоритетом применяются в порядке их ID."
+    )
+    is_active = models.BooleanField(default=True, verbose_name="Активно")
+
+    class Meta:
+        verbose_name = "Правило цвета для срока заказа"
+        verbose_name_plural = "Правила цветов для сроков заказов"
+        ordering = ['priority', 'id'] # Сначала по приоритету, потом по ID для стабильности
+
+    def __str__(self):
+        # Для наглядности в админке и логах
+        # days_remaining_interpretation = f" (дней до срока {self.get_operator_display()} {self.days_threshold})"
+        return f"{self.name} (Приоритет: {self.priority})"
+
+    def check_condition(self, days_remaining_to_due_date):
+        """
+        Проверяет, соответствует ли количество дней до срока этому правилу.
+        days_remaining_to_due_date:
+            > 0: осталось дней до срока
+            = 0: срок сегодня
+            < 0: просрочено на abs(days_remaining_to_due_date) дней
+        """
+        if self.operator == self.OPERATOR_LTE:
+            return days_remaining_to_due_date <= self.days_threshold
+        elif self.operator == self.OPERATOR_GTE:
+            return days_remaining_to_due_date >= self.days_threshold
+        elif self.operator == self.OPERATOR_EQ:
+            return days_remaining_to_due_date == self.days_threshold
+        return False

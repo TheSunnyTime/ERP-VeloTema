@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import OrderStatusColor
 from django.utils.html import format_html # Для отображения цвета
-from uiconfig.models import SupplyStatusColor
+from uiconfig.models import SupplyStatusColor, OrderDueDateColorRule
 from .models import TaskStatusColor
 
 @admin.register(OrderStatusColor)
@@ -81,3 +81,27 @@ class TaskStatusColorAdmin(admin.ModelAdmin):
         return "Нет цвета"
     display_color_preview_admin.short_description = "Предпросмотр цвета"
     # Не забудь, что метод get_status_name_for_admin_display должен быть в модели TaskStatusColor
+
+@admin.register(OrderDueDateColorRule)
+class OrderDueDateColorRuleAdmin(admin.ModelAdmin):
+    list_display = ('name', 'priority', 'days_threshold', 'operator', 'hex_color', 'is_active')
+    list_filter = ('is_active', 'operator')
+    search_fields = ('name', 'hex_color')
+    list_editable = ('priority', 'days_threshold', 'operator', 'hex_color', 'is_active')
+    ordering = ('priority', 'id')
+
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'is_active', 'priority')
+        }),
+        ('Условие срабатывания (относительно сегодняшней даты)', {
+            'fields': ('days_threshold', 'operator'),
+            'description': ("<b>Пояснение:</b> 'Дней до срока' - это разница между датой выполнения заказа и сегодняшним днем. <br>"
+                            "<b>Пример 1 (Просрочено):</b> Если 'дней до срока' <b><= -1</b>, цвет красный. (Порог: -1, Оператор: <=) <br>"
+                            "<b>Пример 2 (Срок сегодня):</b> Если 'дней до срока' <b>== 0</b>, цвет оранжевый. (Порог: 0, Оператор: ==) <br>"
+                            "<b>Пример 3 (Срок скоро):</b> Если 'дней до срока' <b><= 3</b> (и >=0), цвет желтый. (Порог: 3, Оператор: <=). Потребуется правило с более высоким приоритетом для 'срок сегодня'.")
+        }),
+        ('Оформление', {
+            'fields': ('hex_color',)
+        }),
+    )
