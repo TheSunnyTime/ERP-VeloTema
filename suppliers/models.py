@@ -1,3 +1,5 @@
+# suppliers/models.py
+
 from django.db import models, transaction
 from django.db.models import F
 from django.conf import settings
@@ -5,7 +7,6 @@ from django.utils import timezone
 from decimal import Decimal
 from products.models import Product # Убедись, что модель Product импортируется правильно
 
-# ... (твоя модель Supplier остается здесь без изменений) ...
 class Supplier(models.Model):
     name = models.CharField(
         max_length=255, 
@@ -70,7 +71,6 @@ class Supplier(models.Model):
         permissions = [
             ("can_edit_supplier_notes", "Может редактировать примечания поставщика"),
             ("can_change_supplier_status", "Может изменять статус активности поставщика"),
-            # ('can_edit_received_supply', "Может редактировать оприходованные поставки"), # Закомментировано, так как оно определено в Supply
         ]
 
     def __str__(self):
@@ -80,8 +80,8 @@ class Supplier(models.Model):
 class Supply(models.Model):
     STATUS_DRAFT = 'draft'
     STATUS_EXPECTED = 'expected'
-    STATUS_RECEIVED = 'received' # Используется как 'оприходовано'
-    STATUS_PARTIALLY_RECEIVED = 'partially_received'
+    STATUS_RECEIVED = 'received' 
+    STATUS_PARTIALLY_RECEIVED = 'partially_received' # Учтем его тоже при отмене
     STATUS_CANCELLED = 'cancelled'
 
     STATUS_CHOICES = [
@@ -125,7 +125,6 @@ class Supply(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания записи")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления записи")
 
-    # НОВОЕ ПОЛЕ для отслеживания создания кассовой операции
     payment_transaction_created = models.BooleanField(
         default=False, 
         verbose_name="Расходная операция по оплате создана",
@@ -149,93 +148,133 @@ class Supply(models.Model):
     def __str__(self):
         return f"Поставка №{self.id or 'Новая'} от {self.supplier.name} ({self.receipt_date.strftime('%d.%m.%Y')})"
 
-    def get_total_cost(self): # Добавляем этот метод, если его еще не было
-        total = Decimal('0.00') # Используем Decimal для денег
-        for item in self.items.all(): # 'items' - это related_name из SupplyItem.supply
+    def get_total_cost(self):
+        total = Decimal('0.00')
+        # Используем select_related для оптимизации, если items часто дергаются
+        for item in self.items.all(): # items - related_name
             total += item.quantity_received * item.cost_price_per_unit
         return total
 
     def update_stock_on_received(self):
-        # Твой существующий метод update_stock_on_received остается без изменений
-        if self.status == self.STATUS_RECEIVED:
-            with transaction.atomic():
-                print(f"[Supply UpdateStock] Начинаем обновление остатков для поставки #{self.id}")
-                updated_any_product = False
-                for item in self.items.all(): 
-                    product_instance = item.product
-                    print(f"[Supply UpdateStock] Обработка товара: {product_instance.name}, приход: {item.quantity_received}")
-                    
-                    product_to_update = Product.objects.select_for_update().get(pk=product_instance.pk) 
-                    
-                    product_to_update.stock_quantity = F('stock_quantity') + item.quantity_received
-                    
-                    update_fields_list = ['stock_quantity']
-                    if hasattr(product_to_update, 'updated_at'):
-                         update_fields_list.append('updated_at')
+        """
+        Обновляет остатки товаров при оприходовании поставки.
+        Увеличивает Product.stock_quantity.
+        Устанавливает SupplyItem.quantity_remaining_in_batch равным SupplyItem.quantity_received.
+        """
+        # Этот метод вызывается, когда статус становится STATUS_RECEIVED
+        print(f"[Supply UpdateStock] Начинаем обновление остатков для поставки #{self.id}")
+        with transaction.atomic():
+            for item in self.items.select_related('product').all(): 
+                product_instance = item.product
+                print(f"[Supply UpdateStock] Обработка товара: {product_instance.name}, приход: {item.quantity_received}")
+                
+                # Блокируем строку продукта для обновления
+                product_to_update = Product.objects.select_for_update().get(pk=product_instance.pk) 
+                
+                original_stock = product_to_update.stock_quantity
+                product_to_update.stock_quantity = F('stock_quantity') + item.quantity_received
+                
+                update_fields_list = ['stock_quantity']
+                if hasattr(product_to_update, 'updated_at'):
+                     update_fields_list.append('updated_at')
 
-                    product_to_update.save(update_fields=update_fields_list)
-                    updated_any_product = True
+                product_to_update.save(update_fields=update_fields_list)
+                product_to_update.refresh_from_db() # Обновляем значение из БД
+                
+                # Устанавливаем/обновляем quantity_remaining_in_batch при оприходовании
+                item.quantity_remaining_in_batch = item.quantity_received
+                item.save(update_fields=['quantity_remaining_in_batch'])
+                
+                print(f"[Supply UpdateStock] Обновлены остатки для {product_to_update.name}: "
+                      f"было {original_stock}, приход {item.quantity_received}, стало {product_to_update.stock_quantity}. "
+                      f"Себестоимость этой партии: {item.cost_price_per_unit}. "
+                      f"Остаток в партии (SupplyItem {item.id}): {item.quantity_remaining_in_batch}")
+        print(f"[Supply UpdateStock] Завершено обновление остатков для поставки #{self.id}")
+
+
+    def _handle_cancellation(self):
+        """
+        Обрабатывает отмену поставки:
+        - Откатывает изменения stock_quantity для товаров, если поставка была оприходована.
+        - Обнуляет quantity_remaining_in_batch для всех позиций поставки.
+        """
+        print(f"[Supply Cancel] Обработка отмены поставки #{self.id}. Предыдущий статус: {self._previous_status}")
+        with transaction.atomic():
+            for item in self.items.select_related('product').all():
+                # Блокируем строку продукта для обновления
+                product_to_update = Product.objects.select_for_update().get(pk=item.product.pk)
+                
+                # Если предыдущий статус был "Оприходовано" или "Частично оприходовано",
+                # то товары были на складе, и их нужно списать (вернуть).
+                if self._previous_status in [self.STATUS_RECEIVED, self.STATUS_PARTIALLY_RECEIVED]:
+                    original_stock = product_to_update.stock_quantity
+                    product_to_update.stock_quantity = F('stock_quantity') - item.quantity_received
                     
-                    refreshed_product = Product.objects.get(pk=product_instance.pk)
-                    print(f"[Supply UpdateStock] Обновлены остатки для {refreshed_product.name}: +{item.quantity_received}. "
-                          f"Себестоимость этой партии: {item.cost_price_per_unit}. "
-                          f"Основная себестоимость товара в карточке (Product.cost_price) НЕ ИЗМЕНЕНА: {refreshed_product.cost_price}. "
-                          f"Текущий общий остаток: {refreshed_product.stock_quantity}")
-                if not updated_any_product:
-                    print(f"[Supply UpdateStock] Поставка #{self.id} не содержит позиций для обновления остатков.")
-        else:
-            print(f"[Supply UpdateStock] Статус поставки #{self.id} не '{self.STATUS_RECEIVED}', обновление остатков не требуется. Текущий статус: {self.status}")
+                    update_fields_product = ['stock_quantity']
+                    if hasattr(product_to_update, 'updated_at'):
+                        update_fields_product.append('updated_at')
+                    product_to_update.save(update_fields=update_fields_product)
+                    product_to_update.refresh_from_db() 
+                    print(f"[Supply Cancel] Откат остатков для {product_to_update.name}: "
+                          f"было {original_stock}, списано {item.quantity_received}, стало {product_to_update.stock_quantity}")
+
+                # Обнуляем остаток этой партии в SupplyItem, так как отмененная поставка
+                # не должна участвовать в FIFO. Делаем это всегда при отмене.
+                if item.quantity_remaining_in_batch > 0:
+                    original_batch_remaining = item.quantity_remaining_in_batch
+                    item.quantity_remaining_in_batch = 0
+                    item.save(update_fields=['quantity_remaining_in_batch'])
+                    print(f"[Supply Cancel] Обнулен quantity_remaining_in_batch для {item.product.name} в поставке {self.id} "
+                          f"(было {original_batch_remaining}, стало 0)")
+        print(f"[Supply Cancel] Завершена обработка отмены для поставки #{self.id}")
+
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
         
-        # Логика для отслеживания _previous_status остается, она полезна для update_stock_on_received
-        # print(f"[Supply Save] Сохранение поставки #{self.pk}. Старый статус (из _previous_status): {self._previous_status}, Новый статус (из формы/кода): {self.status}")
+        # print(f"[Supply Save] Начало сохранения поставки #{self.pk}. "
+        #       f"Статус в объекте (перед super().save): {self.status}. "
+        #       f"_previous_status (из __init__ или последнего save): {self._previous_status}")
+
+        super().save(*args, **kwargs) # Основное сохранение объекта
         
-        super().save(*args, **kwargs) 
+        # print(f"[Supply Save] Поставка #{self.id} сохранена в БД. "
+        #       f"Текущий статус в объекте (после super().save): {self.status}")
+
+        # Логика обработки изменения статуса
+        # self.status теперь содержит НОВЫЙ статус, сохраненный в БД.
+        # self._previous_status содержит статус, который был ДО этого сохранения.
+
+        just_became_received = (self.status == self.STATUS_RECEIVED and 
+                                self._previous_status != self.STATUS_RECEIVED)
         
-        # Логика для вызова update_stock_on_received остается
-        # current_status_in_db = self.status 
-        # ... (остальная часть твоего метода save для обновления остатков) ...
-        # Это важно, чтобы не сломать существующий функционал.
+        # Учитываем также переход из STATUS_PARTIALLY_RECEIVED в STATUS_RECEIVED
+        # (хотя update_stock_on_received должен быть идемпотентным или обрабатывать дельту,
+        # но для простоты сейчас считаем, что он вызывается один раз при финальном оприходовании)
+        # Если у тебя есть логика для PARTIALLY_RECEIVED, ее нужно будет аккуратно встроить.
+        # Пока считаем, что update_stock_on_received вызывается, когда поставка становится ПОЛНОСТЬЮ RECEIVED.
 
-        # Наша новая логика создания ЗАДАЧИ будет вызываться отдельно,
-        # когда статус меняется на "Оприходовано", но уже ПОСЛЕ того, как сама поставка сохранена.
-        # Это будет сделано в Task.save() или в сигнале для Supply, как мы решим.
-        # Здесь, в Supply.save(), мы НЕ будем напрямую создавать CashTransaction.
+        just_became_cancelled = (self.status == self.STATUS_CANCELLED and 
+                                 self._previous_status != self.STATUS_CANCELLED)
 
-        # Логика обновления остатков (твой существующий код):
-        current_status_in_db = self.status 
-        if not is_new and self.pk:
-             try:
-                current_db_status_obj = Supply.objects.get(pk=self.pk) # Получаем объект
-                current_db_status = current_db_status_obj.status
-                if self.status != current_db_status:
-                     # print(f"[Supply Save] Статус в объекте ({self.status}) отличается от статуса в БД ({current_db_status}) после super().save(). Используем из БД.")
-                     self.status = current_db_status 
-             except Supply.DoesNotExist:
-                # print(f"[Supply Save] Объект Supply #{self.pk} не найден в БД после super().save(). Пропуск update_stock_on_received.")
-                self._previous_status = self.status
-                return
-
-        just_became_received = (not is_new and self.status == self.STATUS_RECEIVED and self._previous_status != self.STATUS_RECEIVED)
-        new_and_received = (is_new and self.status == self.STATUS_RECEIVED)
-
-        if just_became_received or new_and_received:
-            # print(f"[Supply Save] Статус изменился на '{self.STATUS_RECEIVED}' или новый и '{self.STATUS_RECEIVED}'. Вызов update_stock_on_received для поставки #{self.id}.")
-            self.update_stock_on_received() 
-            
-            # ЗДЕСЬ БУДЕТ ЛОГИКА СОЗДАНИЯ ЗАДАЧИ (в будущем)
-            # if not self.payment_transaction_created:
-            #    self.create_task_for_payment_processing() # Пример вызова метода
-            
-        # else:
-            # print(f"[Supply Save] Условия для вызова update_stock_on_received не выполнены для поставки #{self.pk}.")
+        if just_became_received:
+            # Проверяем, что предыдущий статус не был уже RECEIVED, чтобы избежать повторного вызова,
+            # если save вызван несколько раз без изменения статуса с RECEIVED.
+            if self._previous_status != self.STATUS_RECEIVED: # Дополнительная проверка
+                print(f"[Supply Save] Статус изменился на '{self.STATUS_RECEIVED}'. Вызов update_stock_on_received для поставки #{self.id}.")
+                self.update_stock_on_received() 
         
+        elif just_became_cancelled:
+            # Проверяем, что предыдущий статус не был уже CANCELLED.
+            if self._previous_status != self.STATUS_CANCELLED: # Дополнительная проверка
+                print(f"[Supply Save] Статус изменился на '{self.STATUS_CANCELLED}'. Вызов _handle_cancellation для поставки #{self.id}.")
+                self._handle_cancellation()
+        
+        # Обновляем _previous_status для следующего сохранения
         self._previous_status = self.status
+        # print(f"[Supply Save] Завершение сохранения поставки #{self.id}. _previous_status обновлен на {self._previous_status}")
 
 
-# ... (твоя модель SupplyItem остается здесь без изменений) ...
 class SupplyItem(models.Model):
     supply = models.ForeignKey(
         Supply, 
@@ -256,7 +295,7 @@ class SupplyItem(models.Model):
     )
     quantity_remaining_in_batch = models.PositiveIntegerField(
         verbose_name="Остаток из этой партии",
-        help_text="Сколько единиц из этой поставки еще осталось на складе",
+        help_text="Сколько единиц из этой поставки еще осталось на складе. Обновляется при оприходовании или отмене поставки.",
         default=0 
     )
 
@@ -271,6 +310,9 @@ class SupplyItem(models.Model):
         return f"{product_name} ({self.quantity_received} шт.) в поставке ID {supply_id_str}"
 
     def save(self, *args, **kwargs):
-        if self.pk is None and self.quantity_remaining_in_batch == 0 and self.quantity_received and self.quantity_received > 0:
-            self.quantity_remaining_in_batch = self.quantity_received
+        # Логика установки quantity_remaining_in_batch при создании SupplyItem была здесь.
+        # Теперь quantity_remaining_in_batch устанавливается в 0 по умолчанию,
+        # и обновляется до quantity_received методом Supply.update_stock_on_received()
+        # или до 0 методом Supply._handle_cancellation().
+        # Это делает управление этим полем более централизованным и привязанным к статусу поставки.
         super().save(*args, **kwargs)

@@ -4,13 +4,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (typeof django !== 'undefined' && typeof django.jQuery !== 'undefined') {
         const $ = django.jQuery;
-        // console.log('[jQuery] Found. Initializing dynamic updates.');
+        console.log('[PriceUpdater] Initializing...');
 
         // СНАЧАЛА ВСЕ ОПРЕДЕЛЕНИЯ ФУНКЦИЙ:
 
         function parseFloatSafely(value) {
             if (typeof value === 'string') {
-                value = value.replace(',', '.'); // Заменяем запятую на точку для корректного parseFloat
+                value = value.replace(',', '.'); 
             }
             const parsed = parseFloat(value);
             return isNaN(parsed) ? 0 : parsed;
@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const $orderTypeSelect = $('#id_order_type');
             const $orderTypeReadonlyDiv = $('div.field-order_type div.readonly');
 
-            // Не вызываем API на странице добавления, так как тип определится после добавления товаров/услуг
             if (window.location.pathname.includes('/add/')) {
                 // console.log('[OrderTypeAPI] Add page, skipping API call for now.');
                 return;
@@ -65,7 +64,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         let successfullyUpdatedDisplay = false;
                         let typeActuallyChanged = false;
 
-                        // Пытаемся обновить select, если он редактируемый
                         if ($orderTypeSelect.length && !$orderTypeSelect.is('[readonly]') && !$orderTypeSelect.is(':disabled')) {
                             const $optionToSelect = $orderTypeSelect.find('option[value="' + response.order_type_id + '"]');
                             if ($optionToSelect.length > 0) {
@@ -85,9 +83,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                         }
 
-                        // Если select не был обновлен (или его нет/readonly), обновляем readonly div
                         if (!successfullyUpdatedDisplay && $orderTypeReadonlyDiv.length) {
-                            // Проверяем текущий текст, чтобы избежать ненужных обновлений и вызова события
                             const currentTextInReadonly = $orderTypeReadonlyDiv.find('a').length ? $orderTypeReadonlyDiv.find('a').text().trim() : $orderTypeReadonlyDiv.text().trim();
                             if (currentTextInReadonly.toLowerCase() !== response.order_type_name.trim().toLowerCase()) {
                                 const $linkInsideReadonly = $orderTypeReadonlyDiv.find('a');
@@ -119,22 +115,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function updateOrderTotal() {
             let overallTotal = 0;
-            // Селектор для строк инлайнов товаров (Jazzmin может использовать div вместо tr)
             $('#product_items-group .dynamic-product_items.form-row:not(.empty-form), #product_items-group tr.dynamic-product_items:not(.empty-form)').each(function() {
                 const $row = $(this);
                 const $productSelect = $row.find('select[name$="-product"]');
-                if ($productSelect.length && $productSelect.val()) { // Только если товар выбран
+                if ($productSelect.length && $productSelect.val()) { 
                     const $itemTotalEl = $row.find('td.field-display_item_total p, div.field-display_item_total div.readonly');
                     if ($itemTotalEl.length) {
                         overallTotal += parseFloatSafely($itemTotalEl.text());
                     }
                 }
             });
-            // Селектор для строк инлайнов услуг
             $('#service_items-group .dynamic-service_items.form-row:not(.empty-form), #service_items-group tr.dynamic-service_items:not(.empty-form)').each(function() {
                 const $row = $(this);
                 const $serviceSelect = $row.find('select[name$="-service"]');
-                if ($serviceSelect.length && $serviceSelect.val()) { // Только если услуга выбрана
+                if ($serviceSelect.length && $serviceSelect.val()) { 
                     const $itemTotalEl = $row.find('td.field-display_item_total p, div.field-display_item_total div.readonly');
                     if ($itemTotalEl.length) {
                         overallTotal += parseFloatSafely($itemTotalEl.text());
@@ -145,7 +139,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const $orderTotalDisplayElement = $('div.field-get_total_order_amount_display div.readonly');
             if ($orderTotalDisplayElement.length) {
                 const totalStr = overallTotal.toFixed(2);
-                $orderTotalDisplayElement.text(totalStr.replace('.', ',')); // Отображаем с запятой
+                $orderTotalDisplayElement.text(totalStr.replace('.', ',')); 
             }
         }
         
@@ -157,7 +151,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const $quantityInput = $row.find('input[name$="-quantity"]');
             const $priceInput = $row.find('input[name$="-price_at_order"]');
             const $priceReadonlyElement = $row.find('td.field-price_at_order p'); 
-
             const $itemTotalDisplayElement = $row.find('td.field-display_item_total p, div.field-display_item_total div.readonly');
 
             if ($itemTotalDisplayElement.length) {
@@ -166,7 +159,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if ($quantityInput.length) {
                     quantityText = $quantityInput.val();
                 } else {
-                    console.warn('[UpdateItemTotal] Quantity input field not found in row:', $row.attr('id'));
                     quantityText = '0';
                 }
 
@@ -177,16 +169,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     priceText = $priceReadonlyElement.text();
                 } 
                 else {
-                    console.warn('[UpdateItemTotal] Price_at_order field (input or readonly p) not found in row:', $row.attr('id'));
                     priceText = '0.00';
                 }
                 
-                // console.log(`[UpdateItemTotal] Row ID: ${$row.attr('id')}, Raw Qty: '${quantityText}', Raw Price: '${priceText}'`);
-
                 const quantity = parseInt(quantityText, 10); 
                 const price = parseFloatSafely(priceText);
-
-                // console.log(`[UpdateItemTotal] Row ID: ${$row.attr('id')}, Parsed Qty: ${quantity}, Parsed Price: ${price}`);
 
                 if (!isNaN(quantity) && quantity >= 0 && !isNaN(price) && price >= 0) {
                     const itemTotal = quantity * price;
@@ -194,35 +181,39 @@ document.addEventListener('DOMContentLoaded', function() {
                     $itemTotalDisplayElement.text(itemTotalStr.replace('.', ','));
                 } else {
                     $itemTotalDisplayElement.text('0,00');
-                    // console.warn(`[UpdateItemTotal] Row ID: ${$row.attr('id')}. Calculation resulted in NaN or invalid values. Qty: ${quantity}, Price: ${price}. Setting item total to 0,00.`);
                 }
-            } else {
-                // console.warn('[UpdateItemTotal] itemTotalDisplayElement not found in row:', $row.attr('id'));
             }
             updateOrderTotal(); 
             determineOrderTypeViaAPI();
         }
 
-        function fetchAndUpdatePriceAndStock(selectElement, priceFieldIdentifierInModel, apiUrlPrefix, priceJsonKey, stockJsonKey, costPriceJsonKey = 'cost_price', stockDisplaySuffix = " шт.") {
+        // Новый параметр isUserInteraction, по умолчанию false
+        function fetchAndUpdatePriceAndStock(selectElement, priceFieldIdentifierInModel, apiUrlPrefix, priceJsonKey, stockJsonKey, costPriceJsonKey = 'cost_price', stockDisplaySuffix = " шт.", isUserInteraction = false) {
             const $selectElement = $(selectElement);
             const selectedId = $selectElement.val();
             const $row = $selectElement.closest('tr[class*="dynamic-"], .form-row[class*="dynamic-"]');
 
-            if (!$row.length || $row.hasClass('empty-form')) {
-                return;
-            }
+            if (!$row.length || $row.hasClass('empty-form')) return;
 
             const selectName = $selectElement.attr('name');
-            if (!selectName) { return; } 
+            if (!selectName) return; 
             
             const nameParts = selectName.split('-');
-            if (nameParts.length < 2) { return; }
+            if (nameParts.length < 2) return;
 
             const prefix = `${nameParts[0]}-${nameParts[1]}-`;
             const priceInputName = `${prefix}${priceFieldIdentifierInModel}`;
             const $priceInput = $row.find(`input[name="${priceInputName}"]`);
             const $priceReadonlyDisplay = $row.find(`td.field-${priceFieldIdentifierInModel} p`);
+            
+            console.log(`[fetchAndUpdatePriceAndStock] Called for: ${selectName}, Selected ID: ${selectedId}, isUserInteraction: ${isUserInteraction}`);
 
+            // Сбрасываем флаг только если это взаимодействие пользователя
+            if ($priceInput.length && isUserInteraction) {
+                const oldManualPriceFlag = $priceInput.attr('data-manual-price');
+                $priceInput.removeAttr('data-manual-price');
+                console.log(`[fetchAndUpdatePriceAndStock] User interaction: Cleared data-manual-price for ${priceInputName}. Was: ${oldManualPriceFlag}`);
+            }
 
             let $stockDisplayElement = $();
             if (stockJsonKey) {
@@ -232,20 +223,32 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (selectedId) {
                 const fetchUrl = `${apiUrlPrefix}${selectedId}/`;
+                // console.log(`[fetchAndUpdatePriceAndStock] Fetching URL: ${fetchUrl}`);
                 $.ajax({
                     url: fetchUrl,
                     type: 'GET',
                     success: function(data) {
+                        // console.log(`[fetchAndUpdatePriceAndStock] AJAX Success for ${selectName}. Data:`, data);
                         let priceUpdatedViaInput = false;
                         
                         if ($priceInput.length && !$priceInput.is('[readonly]') && !$priceInput.is(':disabled')) {
-                            if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
-                                const priceToSet = parseFloatSafely(data[priceJsonKey]).toFixed(2);
-                                $priceInput.val(priceToSet);
-                                priceUpdatedViaInput = true;
+                            const currentManualPriceFlag = $priceInput.attr('data-manual-price'); 
+                            const isManuallySet = currentManualPriceFlag === 'true';
+                            console.log(`[fetchAndUpdatePriceAndStock] For ${priceInputName} - isManuallySet: ${isManuallySet} (Flag value: ${currentManualPriceFlag})`);
+
+                            if (!isManuallySet) { 
+                                if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
+                                    const priceToSet = parseFloatSafely(data[priceJsonKey]).toFixed(2);
+                                    $priceInput.val(priceToSet);
+                                    console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} SET to ${priceToSet} (API)`);
+                                } else {
+                                    $priceInput.val('0.00');
+                                    console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} SET to 0.00 (API, no data)`);
+                                }
                             } else {
-                                $priceInput.val('0.00');
+                                console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} was manually set. API update SKIPPED. Current value: ${$priceInput.val()}`);
                             }
+                            priceUpdatedViaInput = true; 
                         } 
                         
                         if ((!priceUpdatedViaInput || !$priceInput.length) && $priceReadonlyDisplay.length) {
@@ -278,32 +281,53 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     error: function(xhr, status, error) {
                         console.error('[APIUpdater] Error fetching data for URL', fetchUrl, 'Error:', error, 'Status:', status);
-                        if ($priceInput.length) $priceInput.val('0.00');
-                        else if ($priceReadonlyDisplay.length) $priceReadonlyDisplay.text('-');
-                        
+                        if ($priceInput.length) {
+                            const currentManualPriceFlag = $priceInput.attr('data-manual-price');
+                            const isManuallySet = currentManualPriceFlag === 'true';
+                            if (!isManuallySet) {
+                                $priceInput.val('0.00');
+                            }
+                        } else if ($priceReadonlyDisplay.length) {
+                            $priceReadonlyDisplay.text('-');
+                        }
                         if (stockJsonKey && $stockDisplayElement.length) $stockDisplayElement.text('Ошибка'); 
                         if (costPriceJsonKey && $baseCostDisplayElement.length) $baseCostDisplayElement.text('Ошибка');
                         updateItemTotal($row);
                     }
                 });
             } else { 
-                if ($priceInput.length) $priceInput.val('0.00');
-                else if ($priceReadonlyDisplay.length) $priceReadonlyDisplay.text('-');
-                
+                // console.log(`[fetchAndUpdatePriceAndStock] No selectedId for ${selectName}. Clearing price.`);
+                if ($priceInput.length) {
+                    const currentManualPriceFlag = $priceInput.attr('data-manual-price');
+                    const isManuallySet = currentManualPriceFlag === 'true';
+                    // Если это взаимодействие пользователя (он сбросил выбор) ИЛИ если цена не была ручной, то сбрасываем
+                    if (isUserInteraction || !isManuallySet) { 
+                        $priceInput.val('0.00');
+                        // console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} CLEARED to 0.00 (no selection or not manual)`);
+                    } else {
+                        // console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} was manually set. Clear SKIPPED. Current value: ${$priceInput.val()}`);
+                    }
+                } else if ($priceReadonlyDisplay.length) {
+                    $priceReadonlyDisplay.text('-');
+                }
                 if (stockJsonKey && $stockDisplayElement.length) $stockDisplayElement.text(''); 
                 if (costPriceJsonKey && $baseCostDisplayElement.length) $baseCostDisplayElement.text('---');
                 updateItemTotal($row);
             }
         }
 
-
         // ПОТОМ ОБРАБОТЧИКИ СОБЫТИЙ:
-        $(document).on('change', '#product_items-group select[name$="-product"]', function() {
-            fetchAndUpdatePriceAndStock(this, 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price');
+        $(document).on('change', '#product_items-group select[name$="-product"], #service_items-group select[name$="-service"]', function() {
+            console.log(`[Event] 'change' on select: ${$(this).attr('name')}, Value: ${$(this).val()}`);
+            // Сброс флага теперь внутри fetchAndUpdatePriceAndStock, если isUserInteraction=true
+            
+            if ($(this).attr('name').includes('-product')) {
+                fetchAndUpdatePriceAndStock(this, 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price', true); // Передаем true
+            } else if ($(this).attr('name').includes('-service')) {
+                fetchAndUpdatePriceAndStock(this, 'price_at_order', '/orders-api/get-service-price/', 'price', null, null, true); // Передаем true
+            }
         });
-        $(document).on('change', '#service_items-group select[name$="-service"]', function() {
-            fetchAndUpdatePriceAndStock(this, 'price_at_order', '/orders-api/get-service-price/', 'price', null, null); 
-        });
+        
         $(document).on('input change', 
                        '#product_items-group input[name$="-quantity"], #service_items-group input[name$="-quantity"]', 
                        function() {
@@ -311,45 +335,48 @@ document.addEventListener('DOMContentLoaded', function() {
             updateItemTotal($row);
         });
 
+        $(document).on('input', '#product_items-group input[name$="-price_at_order"], #service_items-group input[name$="-price_at_order"]', function() {
+            const $this = $(this);
+            if (!$this.is('[readonly]') && $this.is(':visible')) { 
+                $this.attr('data-manual-price', 'true');
+                console.log(`[Event] 'input' on price field: ${$this.attr('name')}. data-manual-price SET to true. New value: ${$this.val()}`);
+                const $row = $this.closest('tr[class*="dynamic-"], .form-row[class*="dynamic-"]');
+                updateItemTotal($row); 
+            }
+        });
+
         $(document).on('formset:added', function(event, $rowFromArgs, formsetName) {
             let $row = $($rowFromArgs); 
-            // Этот блок для инициализации select2 на новых строках, если $rowFromArgs не всегда корректен
             if (!($row && $row.length && typeof $row.find === 'function')) {
                 const $lastRowInFormset = $('#' + formsetName + '-group .dynamic-' + formsetName + ':not(.empty-form)').last();
                 if ($lastRowInFormset.length) {
                     $row = $lastRowInFormset;
-                } else { // Если даже последней строки нет (например, первый formset:added на пустой форме)
+                } else { 
                     updateOrderTotal(); 
-                    determineOrderTypeViaAPI(); // Попытка определить тип, хотя инлайнов еще нет
+                    determineOrderTypeViaAPI(); 
                     return; 
                 }
             }
-            
             if ($row.length && typeof $row.find === 'function') { 
-                const $selectsInRow = $row.find('select.admin-autocomplete'); // Предполагаем, что автокомплит имеет этот класс
+                const $selectsInRow = $row.find('select.admin-autocomplete'); 
                 if ($selectsInRow.length && typeof $selectsInRow.select2 === 'function') {
                      $selectsInRow.each(function() {
                         const $select = $(this);
-                        if (!$select.data('select2')) { // Инициализируем, только если еще не инициализирован
+                        if (!$select.data('select2')) { 
                             $select.select2();
                         }
                      });
                 }
-                 // При добавлении новой строки, ее поля (количество, цена) обычно пустые или дефолтные.
-                 // updateItemTotal() обработает это и установит сумму по строке в 0.00
                 updateItemTotal($row); 
             }
-            // Обновляем общую сумму и тип после добавления строки
-            // updateOrderTotal() уже вызывается внутри updateItemTotal()
-            // determineOrderTypeViaAPI() тоже вызывается внутри updateItemTotal()
         });
         $(document).on('formset:removed', function(event, $row, formsetName) {
             updateOrderTotal();
             determineOrderTypeViaAPI();
         });
 
-
         // ПОТОМ ИНИЦИАЛИЗАЦИОННЫЙ КОД:
+        // Здесь isUserInteraction остается false (по умолчанию)
         $('#product_items-group tr.dynamic-product_items:not(.empty-form), #product_items-group .dynamic-product_items.form-row:not(.empty-form)').each(function() {
             const $row = $(this);
             const $select = $row.find('select[name$="-product"]');
@@ -374,7 +401,8 @@ document.addEventListener('DOMContentLoaded', function() {
             determineOrderTypeViaAPI(); 
         }, 300);
 
+        console.log('[PriceUpdater] Initialized.');
     } else {
-        console.warn('[Init] Django jQuery (django.jQuery) not found. Dynamic updates may not work correctly.');
+        console.warn('[PriceUpdater] Django jQuery not available.');
     }
 });
