@@ -39,10 +39,9 @@ class ClientAdmin(admin.ModelAdmin):
     # fields = ('name', 'phone', 'email', 'address', 'client_group', 'notes', 'created_at')
     # --- КОНЕЦ ДОБАВЛЕНИЯ ---
 
-    # Если ты используешь Inputmask для поля 'phone', не забудь класс Media (если он нужен здесь):
-    # class Media:
-    #     js = (
-    #         'admin/js/jquery.init.js',
-    #         'js/vendor/jquery.inputmask.min.js', 
-    #         'js/client_phone_mask.js',       
-    #     )
+    class Media:
+        js = (
+            # УБИРАЕМ 'admin/js/jquery.init.js', # Django сам загрузит jQuery и создаст django.jQuery
+            'vendor/inputmask/jquery.inputmask.js', # Путь к библиотеке Inputmask
+            'clients/js/client_form_masks.js',      # Путь к твоему кастомному JS
+        )
