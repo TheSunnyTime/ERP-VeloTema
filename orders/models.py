@@ -3,20 +3,34 @@ from django.db import models
 from django.db import transaction # Оставляем, если предполагается использование
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.utils import timezone
+from django.utils import timezone # Убедимся, что импорт есть
 from decimal import Decimal, ROUND_HALF_UP
 
 from products.models import Product
 from clients.models import Client
 from cash_register.models import CashRegister # CashTransaction не используется напрямую
 
+# НОВАЯ МОДЕЛЬ
+class ServiceCategory(models.Model):
+    name = models.CharField(max_length=100, unique=True, verbose_name="Название категории услуг")
+    description = models.TextField(blank=True, null=True, verbose_name="Описание")
+
+    class Meta:
+        verbose_name = "Категория услуг"
+        verbose_name_plural = "Категории услуг"
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
 class OrderType(models.Model):
-    TYPE_REPAIR = "Ремонт"
+    TYPE_REPAIR = "Ремонт" # Будем использовать это значение для проверки
     TYPE_SALE = "Продажа"
-    TYPE_UNDEFINED = "Определить"
+    TYPE_UNDEFINED = "Определить" # Если это все еще актуально
 
     name = models.CharField(max_length=100, unique=True, verbose_name="Название типа заказа")
     description = models.TextField(blank=True, null=True, verbose_name="Описание")
+    # Поле calculate_due_date_with_overall_load здесь НЕ НУЖНО, убрано
 
     class Meta:
         verbose_name = "Тип заказа"
@@ -29,6 +43,15 @@ class OrderType(models.Model):
 class Service(models.Model):
     name = models.CharField(max_length=255, unique=True, verbose_name="Название услуги")
     price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Цена услуги")
+    # ИЗМЕНЕНО: Добавлено поле category
+    category = models.ForeignKey(
+        ServiceCategory,
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        verbose_name="Категория услуги",
+        related_name="services" 
+    )
 
     class Meta:
         verbose_name = "Услуга"
@@ -41,17 +64,17 @@ class Service(models.Model):
 class Order(models.Model):
     STATUS_NEW = 'new'
     STATUS_IN_PROGRESS = 'in_progress'
-    STATUS_DELIVERING = 'delivering'  # <--- НОВЫЙ СТАТУС (ключ)
+    STATUS_DELIVERING = 'delivering'
     STATUS_READY = 'ready'
-    STATUS_AWAITING = 'awaiting'        # <--- НОВЫЙ СТАТУС (ключ)
+    STATUS_AWAITING = 'awaiting'
     STATUS_ISSUED = 'issued'
     STATUS_CANCELLED = 'cancelled'
     STATUS_CHOICES = [
         (STATUS_NEW, 'Новый'),
         (STATUS_IN_PROGRESS, 'В работе'),
-        (STATUS_AWAITING, 'Ожидается'),   # <--- НОВЫЙ СТАТУС (отображение)
+        (STATUS_AWAITING, 'Ожидается'),
         (STATUS_READY, 'Готов'),
-        (STATUS_DELIVERING, 'В доставке'), # <--- НОВЫЙ СТАТУС (отображение)
+        (STATUS_DELIVERING, 'В доставке'),
         (STATUS_ISSUED, 'Выдан'),
         (STATUS_CANCELLED, 'Отменен'),
     ]
@@ -104,11 +127,10 @@ class Order(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
     notes = models.TextField(blank=True, null=True, verbose_name="Примечания к заказу")
 
-        # НОВОЕ ПОЛЕ ДЛЯ СРОКА ВЫПОЛНЕНИЯ
     due_date = models.DateField(
         verbose_name="Срок выполнения до",
         null=True,
-        blank=True, # blank=True, если не хотим обязательности на уровне формы, null=True для БД
+        blank=True, 
         help_text="Плановая дата, до которой заказ должен быть выполнен."
     )
 
@@ -143,33 +165,44 @@ class Order(models.Model):
 
     def determine_and_set_order_type(self):
         original_order_type = self.order_type
-        if not self.pk:
+        if not self.pk: # Для нового, еще не сохраненного заказа
             try:
+                # Пытаемся установить тип "Определить" по умолчанию
                 undefined_type = OrderType.objects.get(name=OrderType.TYPE_UNDEFINED)
                 self.order_type = undefined_type
-                return original_order_type != self.order_type
-            except OrderType.DoesNotExist:
-                self.order_type = None
-                return original_order_type != self.order_type
+                return original_order_type != self.order_type # True если тип изменился
+            except OrderType.DoesNotExist: # Если тип "Определить" не найден в БД
+                self.order_type = None # Оставляем тип пустым
+                return original_order_type != self.order_type # True если тип изменился (был не None)
+        
+        # Для существующего заказа, не переопределяем тип, если он уже "Выдан" (чтобы не влиять на историю)
+        # Но позволяем определить тип, если он был "Выдан" и его откатили на другой статус.
         if self.status == self.STATUS_ISSUED and self._previous_status == self.STATUS_ISSUED:
-            return False
+             return False # Тип не менялся, если статус не менялся с "Выдан"
+
         try:
             repair_type_obj = OrderType.objects.get(name=OrderType.TYPE_REPAIR)
             sale_type_obj = OrderType.objects.get(name=OrderType.TYPE_SALE)
             undefined_type_obj = OrderType.objects.get(name=OrderType.TYPE_UNDEFINED)
         except OrderType.DoesNotExist:
-            return False
+            # Если основные типы не найдены, ничего не можем определить
+            return False 
+
         has_services = self.service_items.exists()
         has_products = self.product_items.exists()
-        determined_type = undefined_type_obj
-        if has_services:
+        
+        determined_type = undefined_type_obj # По умолчанию "Определить"
+
+        if has_services: # Если есть хоть одна услуга, это "Ремонт"
             determined_type = repair_type_obj
-        elif has_products:
+        elif has_products: # Если нет услуг, но есть товары, это "Продажа"
             determined_type = sale_type_obj
+        # Если нет ни услуг, ни товаров, останется "Определить"
+
         if self.order_type != determined_type:
             self.order_type = determined_type
-            return True
-        return False
+            return True # Тип изменился
+        return False # Тип не изменился
 
     def get_status_display_for_key(self, status_key):
         if not hasattr(self.__class__, '_status_choices_map_cache'):
@@ -179,14 +212,12 @@ class Order(models.Model):
     def clean(self):
         super().clean()
 
-        # 1. Новый заказ не может быть сразу "Выдан"
         if not self.pk and self.status == self.STATUS_ISSUED:
             raise ValidationError(
                 "Новый заказ не может быть сразу создан со статусом 'Выдан'. "
                 "Пожалуйста, выберите другой начальный статус."
             )
 
-        # 2. Если статус "Выдан", метод оплаты должен быть указан
         if self.status == self.STATUS_ISSUED and not self.payment_method_on_closure:
             raise ValidationError({
                 'payment_method_on_closure': ValidationError(
@@ -195,7 +226,6 @@ class Order(models.Model):
                 )
             })
 
-        # 3. Валидация для исполнителя
         if self.order_type and self.order_type.name == OrderType.TYPE_REPAIR:
             if self.status != self.STATUS_NEW and not self.performer:
                 status_new_display_name = self.get_status_display_for_key(self.STATUS_NEW)
@@ -203,11 +233,16 @@ class Order(models.Model):
                     'performer': ValidationError(
                         f"Поле 'Исполнитель' обязательно для типа заказа '{OrderType.TYPE_REPAIR}', "
                         f"если статус не '{status_new_display_name}'.",
-                        code='performer_required_for_repair_if_not_new_model' # Уникальный код ошибки
+                        code='performer_required_for_repair_if_not_new_model' 
                     )
                 })
 
     def save(self, *args, **kwargs):
+        # Логику определения типа можно вызывать здесь перед сохранением,
+        # если она не зависит от уже сохраненных связанных объектов (товаров/услуг).
+        # Но так как она зависит от product_items и service_items,
+        # ее лучше вызывать в OrderAdmin.save_related после сохранения инлайнов.
+        # self.determine_and_set_order_type() # Потенциально здесь, но см. комментарий
         super().save(*args, **kwargs)
         self._previous_status = self.status
 
