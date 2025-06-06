@@ -1,4 +1,5 @@
-# F:\CRM 2.0\ERP\reports\views.py
+# F:\CRM 2.0\ERP\reports\views.py (ГОТОВАЯ ВЕРСИЯ)
+
 from django.shortcuts import render
 from django.core.exceptions import PermissionDenied
 from django.db.models import Sum, F, ExpressionWrapper, DecimalField
@@ -16,76 +17,52 @@ from django import forms
 from products.models import Product
 from salary_management.models import SalaryCalculation, SalaryPayment
 from cash_register.models import CashTransaction, ExpenseCategory
-from .models import ExpenseReportProxy, StockSummaryReportProxy # Добавил StockSummaryReportProxy для 'opts'
+from .models import ExpenseReportProxy, StockSummaryReportProxy
+
+# +++ ДОБАВЛЕН НОВЫЙ ИМПОРТ ИЗ СЕРВИСНОГО ФАЙЛА +++
+from .services import calculate_stock_report_data_fifo 
 
 from django.contrib import admin
 
 
-# --- ФУНКЦИЯ stock_summary_report С ОТЛАДКОЙ ---
+# --- ПОЛНОСТЬЮ ОБНОВЛЕННАЯ ФУНКЦИЯ stock_summary_report ---
 @staff_member_required
 def stock_summary_report(request):
-    # --- ОТЛАДКА ---
-    print(f"--- Отчет: Сводка по остаткам (stock_summary_report) ---")
-    print(f"Пользователь: {request.user.username}")
-    print(f"request.user.is_active: {request.user.is_active}")
-    print(f"request.user.is_staff: {request.user.is_staff}")
-    print(f"request.user.is_superuser: {request.user.is_superuser}")
-    print(f"Имеет право 'reports.view_stock_summary_report': {request.user.has_perm('reports.view_stock_summary_report')}")
-    # --- КОНЕЦ ОТЛАДКИ ---
-
+    """
+    Отображает сводный отчет по остаткам товаров.
+    Все расчеты (себестоимость, прибыль) производятся на основе FIFO
+    с помощью сервисной функции calculate_stock_report_data_fifo.
+    """
     if not request.user.is_superuser and not request.user.has_perm('reports.view_stock_summary_report'):
-        # --- ОТЛАДКА ---
-        print("!!! stock_summary_report: ПРОВЕРКА ПРАВ НЕ ПРОЙДЕНА! Доступ запрещен.")
-        # --- КОНЕЦ ОТЛАДКИ ---
         raise PermissionDenied("У тебя нет прав для просмотра этого отчета.")
     
-    # --- ОТЛАДКА ---
-    print("stock_summary_report: Проверка прав пройдена. Формируем отчет...")
-    # --- КОНЕЦ ОТЛАДКИ ---
+    # 1. Получаем список товаров для отображения в таблице
+    products_in_stock = Product.objects.filter(stock_quantity__gt=0).order_by('name')
     
-    products_in_stock = Product.objects.filter(stock_quantity__gt=0)
+    # 2. Вызываем сервисную функцию для получения всех расчетных данных (FIFO)
+    report_data = calculate_stock_report_data_fifo()
     
-    total_cost_value = products_in_stock.aggregate(
-        total=Sum(
-            ExpressionWrapper(F('cost_price') * F('stock_quantity'),
-                              output_field=DecimalField(max_digits=12, decimal_places=2))
-        )
-    )['total'] or Decimal('0.00')
-    
-    total_retail_value = products_in_stock.aggregate(
-        total=Sum(
-            ExpressionWrapper(F('retail_price') * F('stock_quantity'),
-                              output_field=DecimalField(max_digits=12, decimal_places=2))
-        )
-    )['total'] or Decimal('0.00')
-    
-    expected_profit = products_in_stock.annotate(
-        profit_per_item=ExpressionWrapper(F('retail_price') - F('cost_price'),
-                                          output_field=DecimalField(max_digits=10, decimal_places=2))
-    ).aggregate(
-        total_profit=Sum(
-            ExpressionWrapper(F('profit_per_item') * F('stock_quantity'),
-                              output_field=DecimalField(max_digits=12, decimal_places=2))
-        )
-    )['total_profit'] or Decimal('0.00')
-    
-    profit_calculation_hint = "(Розничная цена - Себестоимость) * Остаток на складе"
+    # 3. Готовим контекст для шаблона
+    profit_calculation_hint = "(Общая розничная стоимость - Общая FIFO себестоимость)"
 
     context = {
         **admin.site.each_context(request),
-        'title': 'Отчет: Сводка по остаткам товаров',
+        'title': 'Отчет: Сводка по остаткам товаров (FIFO)',
         'products_in_stock': products_in_stock,
-        'total_cost_value': total_cost_value,
-        'total_retail_value': total_retail_value,
-        'expected_profit': expected_profit,
+        
+        # Используем корректные данные, полученные из сервисной функции
+        'total_cost_value': report_data['total_cost_fifo'],
+        'total_retail_value': report_data['total_retail_value'],
+        'expected_profit': report_data['expected_profit'],
+        
         'profit_calculation_hint': profit_calculation_hint,
         'app_label': 'reports',
-        'opts': StockSummaryReportProxy._meta, # Передаем opts для хлебных крошек, если шаблон это использует
+        'opts': StockSummaryReportProxy._meta,
     }
     return render(request, 'admin/reports/stock_summary_report.html', context)
 
 
-# --- Форма для фильтрации отчета по расходам ---
+# --- Форма для фильтрации отчета по расходам (БЕЗ ИЗМЕНЕНИЙ) ---
 class ExpenseReportDateFilterForm(forms.Form):
     current_year = datetime.date.today().year
     current_month = datetime.date.today().month
@@ -100,6 +77,7 @@ class ExpenseReportDateFilterForm(forms.Form):
     year = forms.ChoiceField(choices=YEAR_CHOICES, initial=current_year, label="Год", required=True)
     month = forms.ChoiceField(choices=MONTH_CHOICES, initial=current_month, label="Месяц", required=True)
 
+# --- VIEW-ФУНКЦИЯ expense_report_view (БЕЗ ИЗМЕНЕНИЙ) ---
 @staff_member_required(login_url='admin:login')
 @permission_required('reports.view_expense_report', raise_exception=True)
 def expense_report_view(request):
@@ -109,12 +87,7 @@ def expense_report_view(request):
         form = ExpenseReportDateFilterForm(request.GET)
     else:
         initial_params = {'year': datetime.date.today().year, 'month': datetime.date.today().month}
-        form = ExpenseReportDateFilterForm(data=initial_params) # Используем data для авто-валидации
-        # Важно! Чтобы форма считалась "bound" и is_valid() отработал корректно с начальными данными,
-        # передаем их через 'data', а не 'initial'.
-        # Если form.is_valid() не вызывается далее явно перед использованием cleaned_data, 
-        # то нужно вызвать form.is_valid() здесь, если мы хотим, чтобы cleaned_data было заполнено.
-        # Однако, следующая логика уже предполагает, что form.is_valid() будет вызван.
+        form = ExpenseReportDateFilterForm(data=initial_params)
 
     year_to_filter = None
     month_to_filter = None
@@ -124,10 +97,8 @@ def expense_report_view(request):
         year_to_filter = int(form.cleaned_data['year'])
         month_to_filter = int(form.cleaned_data['month'])
         selected_period_display = f"{dict(ExpenseReportDateFilterForm.MONTH_CHOICES)[month_to_filter]} {year_to_filter}"
-    # Удален блок elif not request.GET, т.к. мы теперь всегда инициализируем форму с данными (GET или initial)
-    # и полагаемся на form.is_valid()
 
-    if year_to_filter and month_to_filter: # Только если год и месяц определены (форма валидна)
+    if year_to_filter and month_to_filter:
         transactions = CashTransaction.objects.filter(
             transaction_type=CashTransaction.TRANSACTION_TYPE_EXPENSE,
             timestamp__year=year_to_filter,
@@ -156,17 +127,16 @@ def expense_report_view(request):
         'title': f'Отчет по расходам {("за " + selected_period_display) if selected_period_display and form.is_valid() else ""}',
         'form': form,
         'report_data_grouped': report_data_grouped,
-        'selected_period_display': selected_period_display if form.is_valid() else "", # Передаем, только если период валиден
+        'selected_period_display': selected_period_display if form.is_valid() else "",
         'opts': ExpenseReportProxy._meta,
         'app_label': ExpenseReportProxy._meta.app_label,
     }
     return render(request, 'admin/reports/expense_report.html', context)
 
-# --- VIEW-ФУНКЦИЯ all_employees_salary_report_view (оставляем твой код) ---
+# --- VIEW-ФУНКЦИЯ all_employees_salary_report_view (БЕЗ ИЗМЕНЕНИЙ) ---
 @staff_member_required
 def all_employees_salary_report_view(request):
-    # ... (твой существующий код для этого отчета, как ты прислал) ...
-    # (код этой функции остается без изменений, так как ты прислал его как рабочий)
+    # ... (ваш существующий код для этого отчета остается здесь без изменений) ...
     if not request.user.has_perm('reports.view_all_employee_salaries'):
         raise PermissionDenied("У тебя нет прав для просмотра этого отчета.")
     today = timezone.now().date()

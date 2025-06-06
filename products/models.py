@@ -1,13 +1,9 @@
-from django.db import models
-from decimal import Decimal
+# F:\CRM 2.0\ERP\products\models.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
-# Create your models here.
-# CRM 2.0/ERP/products/models.py
 from django.db import models
 from decimal import Decimal
 
 class Category(models.Model):
-    # ... (твой код Category) ...
     name = models.CharField(
         max_length=150,
         unique=True,
@@ -46,11 +42,12 @@ class Product(models.Model):
         decimal_places=2,
         verbose_name="Розничная цена"
     )
-    # Убедись, что это поле называется cost_price после наших предыдущих переименований
+    # Это поле себестоимости остается в модели, но для сводных отчетов не используется.
+    # Оно может быть полезно для быстрой справки или как цена по умолчанию.
     cost_price = models.DecimalField( 
         max_digits=10,
         decimal_places=2,
-        verbose_name="Себестоимость" # Это бывшее wholesale_price
+        verbose_name="Себестоимость" 
     )
     stock_quantity = models.PositiveIntegerField(
         default=0,
@@ -67,16 +64,13 @@ class Product(models.Model):
     
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата последнего обновления")
 
-    # --- НОВЫЕ СВОЙСТВА ДЛЯ РАСЧЕТА СУММ ---
-    @property
-    def total_cost_value_in_stock(self):
-        cost = self.cost_price if self.cost_price is not None else Decimal('0.00')
-        quantity = self.stock_quantity if self.stock_quantity is not None else 0
-        return (cost * quantity).quantize(Decimal('0.01'))
-
+    # --- СВОЙСТВА ДЛЯ РАСЧЕТА СУММ ---
     @property
     def total_retail_value_in_stock(self):
+        """
+        Рассчитывает общую розничную стоимость остатков этого товара.
+        """
         retail = self.retail_price if self.retail_price is not None else Decimal('0.00')
         quantity = self.stock_quantity if self.stock_quantity is not None else 0
         return (retail * quantity).quantize(Decimal('0.01'))
-    # --- КОНЕЦ НОВЫХ СВОЙСТВ ---
+    # --- КОНЕЦ СВОЙСТВ ---
