@@ -215,138 +215,204 @@ class OrderAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
     def save_related(self, request, form, formsets, change):
-        # ... (код без изменений, предполагаем, что он корректен и не вызывает проблем с отображением ошибок формы) ...
-        super().save_related(request, form, formsets, change)
-        order_instance = form.instance
+        super().save_related(request, form, formsets, change) 
+        
+        order_instance = form.instance 
+        
         original_order_type_before_determination = order_instance.order_type
-        if order_instance.determine_and_set_order_type():
+        type_changed_by_determination = False
+        if order_instance.determine_and_set_order_type(): 
             if order_instance.order_type != original_order_type_before_determination:
-                order_instance.updated_at = timezone.now()
-                order_instance.save(update_fields=['order_type', 'updated_at'])
-                messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
-        previous_status_from_db = getattr(request, '_current_order_previous_status_from_db_for_save_related', None)
-        current_status_in_object = order_instance.status
-        is_newly_issued = (
+                type_changed_by_determination = True
+                # Сообщение об изменении типа будет выведено позже, если операция успешна
+        
+        previous_db_status = getattr(request, '_current_order_previous_status_from_db_for_save_related', None)
+        current_status_on_form = order_instance.status
+        
+        is_newly_issued_attempt = (
             order_instance.pk is not None and
-            current_status_in_object == Order.STATUS_ISSUED and
-            previous_status_from_db != Order.STATUS_ISSUED
+            current_status_on_form == Order.STATUS_ISSUED and
+            (previous_db_status is None or previous_db_status != Order.STATUS_ISSUED) 
         )
-        if is_newly_issued:
+        
+        print(f"[SAVE_RELATED DEBUG] Order ID: {order_instance.id}")
+        print(f"[SAVE_RELATED DEBUG] previous_db_status: {previous_db_status}")
+        print(f"[SAVE_RELATED DEBUG] current_status_on_form: {current_status_on_form}")
+        print(f"[SAVE_RELATED DEBUG] is_newly_issued_attempt: {is_newly_issued_attempt}")
+
+        operations_successful = False # Инициализируем здесь
+
+        if is_newly_issued_attempt:
+            print(f"[SAVE_RELATED DEBUG] Attempting 'issued' specific operations for order {order_instance.id}")
+            original_target_cash_register_id = order_instance.target_cash_register_id
+
             try:
-                determined_cash_register = None
-                if order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CASH:
-                    try: determined_cash_register = CashRegister.objects.get(is_default_for_cash=True, is_active=True)
-                    except CashRegister.DoesNotExist: raise ValidationError("Не найдена активная касса по умолчанию для НАЛИЧНЫХ.")
-                    except CashRegister.MultipleObjectsReturned: raise ValidationError("Найдено несколько активных касс по умолчанию для НАЛИЧНЫХ.")
-                elif order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CARD:
-                    try: determined_cash_register = CashRegister.objects.get(is_default_for_card=True, is_active=True)
-                    except CashRegister.DoesNotExist: raise ValidationError("Не найдена активная касса по умолчанию для КАРТ.")
-                    except CashRegister.MultipleObjectsReturned: raise ValidationError("Найдено несколько активных касс по умолчанию для КАРТ.")
-                if not determined_cash_register:
-                    raise ValidationError(f"Не удалось автоматически определить кассу для метода '{order_instance.get_payment_method_on_closure_display()}'.")
+                print("[SAVE_RELATED DEBUG] Inside 'is_newly_issued_attempt' TRY block")
+                
+                # Проверки, которые должны были быть в Order.clean() (оставляем для отладки, если они там не сработали)
+                if not order_instance.payment_method_on_closure: raise ValidationError("Метод оплаты должен быть указан (проверка в save_related).")
+                if order_instance.order_type and order_instance.order_type.name == OrderType.TYPE_REPAIR and not order_instance.performer: raise ValidationError(f"Исполнитель должен быть указан для '{OrderType.TYPE_REPAIR}' (проверка в save_related).")
+                
+                determined_cash_register_qs = CashRegister.objects.none()
+                if order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CASH: determined_cash_register_qs = CashRegister.objects.filter(is_default_for_cash=True, is_active=True)
+                elif order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CARD: determined_cash_register_qs = CashRegister.objects.filter(is_default_for_card=True, is_active=True)
+                if not determined_cash_register_qs.exists(): raise ValidationError("Касса по умолчанию не найдена.")
+                if determined_cash_register_qs.count() > 1: raise ValidationError("Найдено несколько касс по умолчанию.")
+                determined_cash_register = determined_cash_register_qs.first(); print(f"[SAVE_RELATED DEBUG] Determined cash register: {determined_cash_register}")
+                
                 current_order_total = order_instance.calculate_total_amount()
-                if not (current_order_total > Decimal('0.00')):
-                    raise ValidationError(f"Сумма заказа ({current_order_total}) должна быть > 0 для выдачи.")
+                if not (current_order_total > Decimal('0.00')): raise ValidationError(f"Сумма заказа ({current_order_total}) должна быть > 0 для выдачи."); print(f"[SAVE_RELATED DEBUG] Order total: {current_order_total}")
+                
                 with transaction.atomic():
-                    for order_item_instance in order_instance.product_items.all():
-                        try:
-                            calculate_and_assign_fifo_cost(order_item_instance)
-                            order_item_instance.save(update_fields=['cost_price_at_sale'])
-                        except ValidationError as e_fifo:
-                            raise ValidationError(f"Ошибка FIFO для товара '{order_item_instance.product.name}': {str(e_fifo)}")
-                    for item_to_update_stock in order_instance.product_items.all():
-                        product_to_update = Product.objects.select_for_update().get(pk=item_to_update_stock.product.pk)
-                        if product_to_update.stock_quantity < item_to_update_stock.quantity:
-                            raise ValidationError(f"Недостаточно общего остатка товара '{product_to_update.name}' на складе. Доступно: {product_to_update.stock_quantity}, Требуется: {item_to_update_stock.quantity}.")
-                        product_to_update.stock_quantity = F('stock_quantity') - item_to_update_stock.quantity
-                        update_fields_for_product = ['stock_quantity']
-                        if hasattr(product_to_update, 'updated_at'): update_fields_for_product.append('updated_at')
-                        product_to_update.save(update_fields=update_fields_for_product)
-                    order_instance.target_cash_register = determined_cash_register
+                    print("[SAVE_RELATED DEBUG] Inside transaction.atomic()")
+                    for item_idx, order_item_instance in enumerate(order_instance.product_items.all()): print(f"[SAVE_RELATED DEBUG] Processing FIFO for item {item_idx + 1}: {order_item_instance.product.name}"); calculate_and_assign_fifo_cost(order_item_instance); order_item_instance.save(update_fields=['cost_price_at_sale']); print(f"[SAVE_RELATED DEBUG] FIFO cost_price_at_sale for {order_item_instance.product.name}: {order_item_instance.cost_price_at_sale}")
+                    for item_idx, item_to_update_stock in enumerate(order_instance.product_items.all()): print(f"[SAVE_RELATED DEBUG] Updating stock for item {item_idx + 1}: {item_to_update_stock.product.name}"); product_to_update = Product.objects.select_for_update().get(pk=item_to_update_stock.product.pk);_ = product_to_update.stock_quantity < item_to_update_stock.quantity and (_ for _ in ()).throw(ValidationError(f"Недостаточно общего остатка товара '{product_to_update.name}' (в наличии: {product_to_update.stock_quantity}, требуется: {item_to_update_stock.quantity})")); product_to_update.stock_quantity -= item_to_update_stock.quantity; product_to_update.updated_at = timezone.now(); product_to_update.save(update_fields=['stock_quantity', 'updated_at']); print(f"[SAVE_RELATED DEBUG] Stock updated for {product_to_update.name}, new stock: {product_to_update.stock_quantity}")
+                    
+                    # Сохраняем target_cash_register и updated_at для заказа
+                    # Статус 'Выдан' уже сохранен в save_model.
+                    order_instance.target_cash_register = determined_cash_register # Устанавливаем перед сохранением
                     order_instance.updated_at = timezone.now()
-                    order_instance.save(update_fields=['target_cash_register', 'updated_at'])
-                    if not CashTransaction.objects.filter(order=order_instance, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME).exists():
-                        CashTransaction.objects.create(
-                            cash_register=order_instance.target_cash_register, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME,
-                            payment_method=order_instance.payment_method_on_closure, amount=current_order_total,
-                            employee=order_instance.manager, order=order_instance,
-                            description=f"Оплата по заказу №{order_instance.id} (статус Выдан)"
-                        )
+                    order_instance.save(update_fields=['target_cash_register', 'updated_at']) 
+                    print(f"[SAVE_RELATED DEBUG] Order target_cash_register and updated_at saved. Target cash: {determined_cash_register}")
+
+                    if not CashTransaction.objects.filter(order=order_instance, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME).exists(): CashTransaction.objects.create(cash_register=order_instance.target_cash_register, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME, payment_method=order_instance.payment_method_on_closure, amount=current_order_total, employee=order_instance.manager, order=order_instance, description=f"Оплата по заказу №{order_instance.id} (статус Выдан)"); print("[SAVE_RELATED DEBUG] Cash transaction created.")
+                    
+                    # --- НАЧАЛО БЛОКА РАСЧЕТА ЗАРПЛАТЫ (ВСТАВЬ СЮДА СВОЙ ПОЛНЫЙ КОД С ОТЛАДОЧНЫМИ PRINT) ---
+                    print(f"[SAVE_RELATED DEBUG] Starting Salary calculation block for order {order_instance.id}...")
+                    
+                    # Пример структуры с отладочными print'ами (замени на свой актуальный код):
                     earners_to_process = []
-                    if order_instance.manager: earners_to_process.append({'employee_obj': order_instance.manager, 'role_key_for_rate': EmployeeRate.ROLE_MANAGER, 'role_verbose': 'Менеджер', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_MANAGER})
-                    if order_instance.performer: earners_to_process.append({'employee_obj': order_instance.performer, 'role_key_for_rate': EmployeeRate.ROLE_PERFORMER, 'role_verbose': 'Исполнитель', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_PERFORMER})
+                    if order_instance.manager:
+                        print(f"[SALARY DEBUG] Adding manager {order_instance.manager.username} to earners_to_process.")
+                        earners_to_process.append({
+                            'employee_obj': order_instance.manager, 
+                            'role_key_for_rate': EmployeeRate.ROLE_MANAGER,
+                            'role_verbose': 'Менеджер',
+                            'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_MANAGER
+                        })
+                    else:
+                        print("[SALARY DEBUG] No manager assigned to order for salary calculation.")
+                    
+                    if order_instance.performer:
+                        print(f"[SALARY DEBUG] Adding performer {order_instance.performer.username} to earners_to_process.")
+                        earners_to_process.append({
+                            'employee_obj': order_instance.performer,
+                            'role_key_for_rate': EmployeeRate.ROLE_PERFORMER,
+                            'role_verbose': 'Исполнитель',
+                            'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_PERFORMER
+                        })
+                    else:
+                        print("[SALARY DEBUG] No performer assigned to order for salary calculation.")
+                    
                     any_salary_calculated_this_session = False
-                    for earner_info in earners_to_process:
-                        employee, role_key_for_rate, role_verbose_name, salary_calc_context_key = earner_info['employee_obj'], earner_info['role_key_for_rate'], earner_info['role_verbose'], earner_info['salary_calc_role_context']
+                    for earner_info_idx, earner_info in enumerate(earners_to_process):
+                        employee = earner_info['employee_obj']
+                        role_key_for_rate = earner_info['role_key_for_rate']
+                        role_verbose_name = earner_info['role_verbose']
+                        salary_calc_context_key = earner_info['salary_calc_role_context']
+                        print(f"[SALARY DEBUG {earner_info_idx+1}] Processing for: {employee.username}, Role: {role_verbose_name}, Order Type: {order_instance.order_type}")
                         employee_rate_instance = None
                         if order_instance.order_type:
-                            try: employee_rate_instance = EmployeeRate.objects.get(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True)
-                            except EmployeeRate.DoesNotExist: pass
-                            except EmployeeRate.MultipleObjectsReturned: employee_rate_instance = EmployeeRate.objects.filter(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True).first()
+                            try:
+                                employee_rate_instance = EmployeeRate.objects.get(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True)
+                                print(f"[SALARY DEBUG {earner_info_idx+1}] Found active rate: ID {employee_rate_instance.id}, Product Profit %: {employee_rate_instance.product_profit_percentage}, Service %: {employee_rate_instance.service_percentage}")
+                            except EmployeeRate.DoesNotExist: print(f"[SALARY DEBUG {earner_info_idx+1}] Active rate for {employee.username} (Role: {role_verbose_name}, Order Type: {order_instance.order_type}) NOT FOUND.")
+                            except EmployeeRate.MultipleObjectsReturned: print(f"[SALARY DEBUG {earner_info_idx+1}] Multiple active rates found for {employee.username}. Using first one."); employee_rate_instance = EmployeeRate.objects.filter(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True).first()
+                        else: print(f"[SALARY DEBUG {earner_info_idx+1}] Order type is not set, cannot find rate.")
                         if not employee_rate_instance: messages.warning(request, f"Активная ставка для {employee} ({role_verbose_name}) для типа заказа '{order_instance.order_type}' не найдена. ЗП не начислена."); continue
                         salary_calc_obj, sc_created, sc_preexisting_non_zero_calc = self._get_or_create_salary_calculation(request, order_instance, employee, salary_calc_context_key, role_verbose_name)
-                        if not sc_created: salary_calc_obj.service_details.all().delete(); salary_calc_obj.product_profit_details.all().delete(); salary_calc_obj.total_calculated_amount = Decimal('0.00')
+                        if not sc_created: print(f"[SALARY DEBUG {earner_info_idx+1}] Old SalaryCalculation details cleared for ID: {salary_calc_obj.id}"); salary_calc_obj.service_details.all().delete(); salary_calc_obj.product_profit_details.all().delete(); salary_calc_obj.total_calculated_amount = Decimal('0.00')
                         current_session_earned_total_for_role = Decimal('0.00')
                         if employee_rate_instance.product_profit_percentage > Decimal('0.00'):
-                            for item in order_instance.product_items.all():
+                            print(f"[SALARY DEBUG {earner_info_idx+1}] Calculating product profit for {employee.username}, %: {employee_rate_instance.product_profit_percentage}")
+                            for item_idx_prod, item in enumerate(order_instance.product_items.all()):
                                 if item.price_at_order is not None and item.cost_price_at_sale is not None and item.quantity > 0:
                                     profit_per_unit = item.price_at_order - item.cost_price_at_sale; total_profit_for_line = profit_per_unit * item.quantity
+                                    print(f"[SALARY DEBUG {earner_info_idx+1}] Product item {item_idx_prod+1} '{item.product.name}': Price={item.price_at_order}, Cost={item.cost_price_at_sale}, Qty={item.quantity}, ProfitLine={total_profit_for_line}")
                                     if total_profit_for_line > Decimal('0.00'):
                                         earned_from_profit = (total_profit_for_line * (employee_rate_instance.product_profit_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                                        if earned_from_profit > Decimal('0.00'): ProductSalaryDetail.objects.create(salary_calculation=salary_calc_obj, order_product_item=item, product_name_snapshot=item.product.name, product_price_at_sale=item.price_at_order, product_cost_at_sale=item.cost_price_at_sale, profit_from_item=total_profit_for_line.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), applied_percentage=employee_rate_instance.product_profit_percentage, earned_amount=earned_from_profit); current_session_earned_total_for_role += earned_from_profit
+                                        if earned_from_profit > Decimal('0.00'): ProductSalaryDetail.objects.create(salary_calculation=salary_calc_obj, order_product_item=item, product_name_snapshot=item.product.name, product_price_at_sale=item.price_at_order, product_cost_at_sale=item.cost_price_at_sale, profit_from_item=total_profit_for_line.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), applied_percentage=employee_rate_instance.product_profit_percentage, earned_amount=earned_from_profit); current_session_earned_total_for_role += earned_from_profit; print(f"[SALARY DEBUG {earner_info_idx+1}] +{earned_from_profit} from product '{item.product.name}'")
                         can_earn_from_services = order_instance.order_type and order_instance.order_type.name != OrderType.TYPE_SALE
                         if can_earn_from_services and employee_rate_instance.service_percentage > Decimal('0.00'):
-                            for service_item in order_instance.service_items.all():
+                            print(f"[SALARY DEBUG {earner_info_idx+1}] Calculating service payment for {employee.username}, %: {employee_rate_instance.service_percentage}")
+                            for item_idx_serv, service_item in enumerate(order_instance.service_items.all()):
                                 base_amount = service_item.get_item_total()
+                                print(f"[SALARY DEBUG {earner_info_idx+1}] Service item {item_idx_serv+1} '{service_item.service.name}': BaseAmount={base_amount}")
                                 if base_amount is not None and base_amount > Decimal('0.00'):
                                     earned_from_service = (base_amount * (employee_rate_instance.service_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                                    if earned_from_service > Decimal('0.00'): SalaryCalculationDetail.objects.create(salary_calculation=salary_calc_obj, order_service_item=service_item, source_description=service_item.service.name, base_amount_for_calc=base_amount, applied_percentage=employee_rate_instance.service_percentage, earned_amount=earned_from_service, detail_type=f"service_{role_key_for_rate}"); current_session_earned_total_for_role += earned_from_service
+                                    if earned_from_service > Decimal('0.00'): SalaryCalculationDetail.objects.create(salary_calculation=salary_calc_obj, order_service_item=service_item, source_description=service_item.service.name, base_amount_for_calc=base_amount, applied_percentage=employee_rate_instance.service_percentage, earned_amount=earned_from_service, detail_type=f"service_{role_key_for_rate}"); current_session_earned_total_for_role += earned_from_service; print(f"[SALARY DEBUG {earner_info_idx+1}] +{earned_from_service} from service '{service_item.service.name}'")
+                        print(f"[SALARY DEBUG {earner_info_idx+1}] Total earned for role in this session: {current_session_earned_total_for_role}")
                         if current_session_earned_total_for_role > Decimal('0.00') or sc_created or (not sc_created and sc_preexisting_non_zero_calc and salary_calc_obj.total_calculated_amount != current_session_earned_total_for_role):
-                            salary_calc_obj.total_calculated_amount = current_session_earned_total_for_role.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                            rule_parts = []; service_details_exist = salary_calc_obj.service_details.filter(earned_amount__gt=0).exists(); product_details_exist = salary_calc_obj.product_profit_details.filter(earned_amount__gt=0).exists()
+                            salary_calc_obj.total_calculated_amount = current_session_earned_total_for_role.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP); rule_parts = []; service_details_exist = salary_calc_obj.service_details.filter(earned_amount__gt=0).exists(); product_details_exist = salary_calc_obj.product_profit_details.filter(earned_amount__gt=0).exists()
                             if service_details_exist: rule_parts.append(f"Услуги: {employee_rate_instance.service_percentage}%")
                             if product_details_exist: rule_parts.append(f"Приб.тов.: {employee_rate_instance.product_profit_percentage}%")
                             salary_calc_obj.applied_base_rule_info = f"Ставка для {role_verbose_name} ({employee.username}) в заказе типа '{order_instance.order_type.name if order_instance.order_type else 'N/A'}': {'; '.join(rule_parts) if rule_parts else 'Ставка применена, начислений нет'}."; salary_calc_obj.calculation_type = f"Сдельная ({role_verbose_name})"; salary_calc_obj.period_date = order_instance.updated_at.date(); salary_calc_obj.save(); any_salary_calculated_this_session = True
+                            print(f"[SALARY DEBUG {earner_info_idx+1}] SAVED SalaryCalculation for {employee.username}, Amount: {salary_calc_obj.total_calculated_amount}, Info: {salary_calc_obj.applied_base_rule_info}")
                             messages.success(request, f"Зарплата для {employee} (Роль: {role_verbose_name}) по заказу #{order_instance.id} начислена/обновлена: {salary_calc_obj.total_calculated_amount} руб.")
                         elif not sc_created and not sc_preexisting_non_zero_calc and current_session_earned_total_for_role == Decimal('0.00'): messages.info(request, f"Для {employee} (Роль: {role_verbose_name}) по заказу #{order_instance.id} в этой сессии начислений не произведено.")
-                    if any_salary_calculated_this_session: order_instance.updated_at = timezone.now(); order_instance.save(update_fields=['updated_at'])
-            except ValidationError as e:
-                if previous_status_from_db and order_instance.status != previous_status_from_db:
-                    order_instance.status = previous_status_from_db
-                if hasattr(e, 'message_dict'):
-                    for field_name, error_list in e.message_dict.items():
-                        for single_error_message in error_list:
-                            field_label = field_name
-                            if field_name in form.fields:
-                                field_label_from_form = form.fields.get(field_name)
-                                if field_label_from_form and hasattr(field_label_from_form, 'label'): field_label = field_label_from_form.label
-                            if field_label == '__all__': messages.error(request, f"Ошибка: {single_error_message}")
-                            else: messages.error(request, f"Ошибка (поле: {field_label if field_label else 'Неизвестное поле'}): {single_error_message}")
-                elif hasattr(e, 'messages') and isinstance(e.messages, list):
-                    for single_error_message in e.messages: messages.error(request, f"Ошибка: {single_error_message}")
-                else: messages.error(request, f"Ошибка при выдаче заказа №{order_instance.id}: {str(e)}")
+                    if any_salary_calculated_this_session: print("[SALARY DEBUG] Salaries were calculated/updated, updating order's updated_at."); order_instance.updated_at = timezone.now(); order_instance.save(update_fields=['updated_at'])
+                    else: print("[SALARY DEBUG] No salaries were calculated/updated in this session.")
+                    # --- КОНЕЦ БЛОКА РАСЧЕТА ЗАРПЛАТЫ ---
 
+                operations_successful = True
+                print("[SAVE_RELATED DEBUG] All 'issued' operations successful within transaction (including salary).")
+
+            except ValidationError as e:
+                print(f"[SAVE_RELATED DEBUG] ValidationError caught in 'is_newly_issued_attempt': {str(e)}")
+                messages.error(request, f"Не удалось завершить выдачу заказа №{order_instance.id}: {str(e)}")
+                
+            finally:
+                print(f"[SAVE_RELATED DEBUG] Finally block. operations_successful: {operations_successful}, previous_db_status: {previous_db_status}")
+                if not operations_successful and previous_db_status is not None:
+                    if previous_db_status != Order.STATUS_ISSUED:
+                        print(f"[SAVE_RELATED DEBUG] Reverting status in DB from '{order_instance.status}' to '{previous_db_status}' for order {order_instance.id}")
+                        Order.objects.filter(pk=order_instance.pk).update(
+                            status=previous_db_status, 
+                            updated_at=timezone.now(),
+                            target_cash_register_id=original_target_cash_register_id 
+                        )
+                        form.instance.status = previous_db_status 
+                        form.instance.target_cash_register_id = original_target_cash_register_id
+                        messages.info(request, f"Статус заказа №{order_instance.id} возвращен на '{order_instance.get_status_display_for_key(previous_db_status)}'. Операции по выдаче отменены.")
+                    else:
+                        print(f"[SAVE_RELATED DEBUG] Status not reverted: previous_db_status was already 'issued'. Current form status on error: {form.instance.status}")
+                elif operations_successful:
+                     print("[SAVE_RELATED DEBUG] Operations were successful, no status revert needed.")
+                elif previous_db_status is None:
+                     print("[SAVE_RELATED DEBUG] previous_db_status is None (new object?), cannot revert status based on it.")
+        
+        else: # if not is_newly_issued_attempt:
+            print(f"[SAVE_RELATED DEBUG] 'is_newly_issued_attempt' is False. No 'issued' specific operations for order {order_instance.id}.")
+        
+        # Логика сохранения измененного типа заказа (если это не была неудачная попытка выдачи)
+        if type_changed_by_determination:
+            # Сохраняем тип, если:
+            # 1. Это не была попытка выдачи (is_newly_issued_attempt is False)
+            # 2. ИЛИ это была УСПЕШНАЯ попытка выдачи (is_newly_issued_attempt is True AND operations_successful is True)
+            if not is_newly_issued_attempt or (is_newly_issued_attempt and operations_successful):
+                # Убедимся, что тип действительно изменился по сравнению с тем, что было до determine_and_set_order_type
+                if order_instance.order_type != original_order_type_before_determination:
+                    print(f"[SAVE_RELATED DEBUG] Final save for order type change for order {order_instance.id}. Original type: {original_order_type_before_determination}, New type: {order_instance.order_type}")
+                    order_instance.updated_at = timezone.now() 
+                    order_instance.save(update_fields=['order_type', 'updated_at'])
+                    messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.") # Показываем сообщение здесь
+    
+    # ... (остальные методы, change_view, Media) ...
     def change_view(self, request, object_id, form_url='', extra_context=None):
-        # Убираем отладочный print отсюда
+        # ... (твой код change_view без отладочных print) ...
         original_extra_context = extra_context.copy() if extra_context else {}
         order = self.get_object(request, object_id)
         if order:
             try:
                 order_content_type = ContentType.objects.get_for_model(order)
-                available_templates = DocumentTemplate.objects.filter(
-                    document_type__related_model=order_content_type,
-                    is_active=True
-                )
+                available_templates = DocumentTemplate.objects.filter(document_type__related_model=order_content_type, is_active=True)
                 original_extra_context['available_document_templates'] = available_templates
                 original_extra_context['current_object_id'] = object_id
                 original_extra_context['current_order_status_is_issued'] = (order.status == Order.STATUS_ISSUED)
             except ContentType.DoesNotExist:
-                original_extra_context['available_document_templates'] = None
-                messages.warning(request, "Не удалось определить тип контента для Заказа.")
+                original_extra_context['available_document_templates'] = None; messages.warning(request, "Не удалось определить тип контента для Заказа.")
             except Exception as e:
-                original_extra_context['available_document_templates'] = None
-                messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
-        
+                original_extra_context['available_document_templates'] = None; messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
         return super().change_view(request, object_id, form_url, extra_context=original_extra_context)
 
 
