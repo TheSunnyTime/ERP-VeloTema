@@ -157,39 +157,45 @@ class Supply(models.Model):
 
     def update_stock_on_received(self):
         """
-        Обновляет остатки товаров при оприходовании поставки.
+        Обновляет остатки товаров и Product.cost_price при оприходовании поставки.
         Увеличивает Product.stock_quantity.
         Устанавливает SupplyItem.quantity_remaining_in_batch равным SupplyItem.quantity_received.
+        Обновляет Product.cost_price на значение item.cost_price_per_unit из этой поставки.
         """
-        # Этот метод вызывается, когда статус становится STATUS_RECEIVED
-        print(f"[Supply UpdateStock] Начинаем обновление остатков для поставки #{self.id}")
+        print(f"[Supply UpdateStock] Начинаем обновление остатков и себестоимости для поставки #{self.id}")
         with transaction.atomic():
             for item in self.items.select_related('product').all(): 
                 product_instance = item.product
-                print(f"[Supply UpdateStock] Обработка товара: {product_instance.name}, приход: {item.quantity_received}")
+                print(f"[Supply UpdateStock] Обработка товара: {product_instance.name}, приход: {item.quantity_received}, себестоимость партии: {item.cost_price_per_unit}")
                 
-                # Блокируем строку продукта для обновления
                 product_to_update = Product.objects.select_for_update().get(pk=product_instance.pk) 
                 
                 original_stock = product_to_update.stock_quantity
+                original_cost_price = product_to_update.cost_price # Запомним старую себестоимость для лога
+
+                # Обновляем количество на складе
                 product_to_update.stock_quantity = F('stock_quantity') + item.quantity_received
                 
-                update_fields_list = ['stock_quantity']
+                # --- НОВОЕ: Обновляем Product.cost_price ---
+                # Устанавливаем себестоимость товара равной себестоимости из этой (последней) партии
+                product_to_update.cost_price = item.cost_price_per_unit 
+                # --- КОНЕЦ НОВОГО ---
+                
+                update_fields_list = ['stock_quantity', 'cost_price'] # Добавили cost_price
                 if hasattr(product_to_update, 'updated_at'):
-                     update_fields_list.append('updated_at')
+                     update_fields_list.append('updated_at') # Обновляем и updated_at, если есть
 
                 product_to_update.save(update_fields=update_fields_list)
-                product_to_update.refresh_from_db() # Обновляем значение из БД
+                product_to_update.refresh_from_db() 
                 
-                # Устанавливаем/обновляем quantity_remaining_in_batch при оприходовании
                 item.quantity_remaining_in_batch = item.quantity_received
                 item.save(update_fields=['quantity_remaining_in_batch'])
                 
-                print(f"[Supply UpdateStock] Обновлены остатки для {product_to_update.name}: "
-                      f"было {original_stock}, приход {item.quantity_received}, стало {product_to_update.stock_quantity}. "
-                      f"Себестоимость этой партии: {item.cost_price_per_unit}. "
+                print(f"[Supply UpdateStock] Обновлены данные для {product_to_update.name}: "
+                      f"Остаток: было {original_stock}, стало {product_to_update.stock_quantity} (+{item.quantity_received}). "
+                      f"Product.cost_price: было {original_cost_price}, стало {product_to_update.cost_price} (из партии ID {item.id}). "
                       f"Остаток в партии (SupplyItem {item.id}): {item.quantity_remaining_in_batch}")
-        print(f"[Supply UpdateStock] Завершено обновление остатков для поставки #{self.id}")
+        print(f"[Supply UpdateStock] Завершено обновление остатков и себестоимости для поставки #{self.id}")
 
 
     def _handle_cancellation(self):

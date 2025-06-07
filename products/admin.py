@@ -186,12 +186,14 @@ class ProductAdmin(admin.ModelAdmin):
     search_fields = ('name', 'sku') 
     autocomplete_fields = ('category',)
     
-    readonly_fields_list = []
+    # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+    readonly_fields_list = ['stock_quantity', 'cost_price'] # Добавляем поля сюда
     if hasattr(Product, 'created_at'): 
         readonly_fields_list.append('created_at')
     if hasattr(Product, 'updated_at'): 
         readonly_fields_list.append('updated_at')
-    readonly_fields = tuple(readonly_fields_list)
+    readonly_fields = tuple(set(readonly_fields_list)) # set для уникальности, если вдруг дубли
+    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
     
     inlines = [SupplyItemInlineForProduct, OrderProductItemInlineForProduct]
 

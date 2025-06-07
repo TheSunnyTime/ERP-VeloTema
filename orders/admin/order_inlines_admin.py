@@ -56,10 +56,10 @@ class OrderProductItemInline(admin.TabularInline):
     fields = (
         'product', 
         'get_current_stock', 
-        'display_product_base_cost_price',
+        'cost_price_at_sale',
+        # 'display_product_base_cost_price', # <--- УБИРАЕМ ЭТУ СТРОКУ
         'quantity', 
         'price_at_order',
-        'cost_price_at_sale',
         'display_item_total'
     )
     

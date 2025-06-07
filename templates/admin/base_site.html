@@ -1,0 +1,29 @@
+{% extends "admin/base.html" %}
+{% load static i18n %} {# Добавил i18n для _('Django administration') #}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    {# --- FAVICONS --- #}
+    {# Основная иконка для вкладок браузера #}
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static '32x32.png' %}">
+    
+    {# Иконка для Apple устройств (экраны "Домой") #}
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static '180x180.png' %}">
+    
+    {# Рекомендуется также иметь favicon.ico для старых браузеров и корневого запроса #}
+    {# Если у тебя его нет, можешь пока закомментировать или удалить эту строку. #}
+    {# Но лучше сгенерировать favicon.ico (например, 16x16 и 32x32) и положить его тоже в static/ #}
+    {# <link rel="shortcut icon" href="{% static 'favicon.ico' %}"> #}
+    {# --- END FAVICONS --- #}
+{% endblock %}
+
+{% block branding %}
+    <div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a></div>
+    {% if user.is_anonymous %}
+      {% include "admin/color_theme_toggle.html" %}
+    {% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

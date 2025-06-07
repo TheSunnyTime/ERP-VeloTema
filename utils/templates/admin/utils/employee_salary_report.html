@@ -1,63 +1,104 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static %}
+{% load utils_custom_tags %} {# Убедись, что этот файл тегов существует и загружается #}
 
 {% block extrastyle %}
     {{ block.super }}
     <style>
-        .report-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .report-table th, .report-table td { border: 1px solid var(--border-color, #ccc); padding: 8px; text-align: left; }
-        .report-table th { background-color: var(--table-header-bg, var(--module-bg, #f0f0f0)); color: var(--table-header-fg, var(--header-fg, #333333)); font-weight: bold; }
-        .report-table td.amount, .report-table th.amount { text-align: right; }
-        
-        .totals-summary { 
-            margin-top:20px; 
-            padding:15px; 
-            background-color: var(--module-bg); 
-            border: 1px solid var(--border-color); 
-            border-radius: 4px; 
+        /* Стили для отчета "Моя зарплата" */
+
+        .report-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-bottom: 20px; 
         }
-        .totals-summary p { 
-            margin: 5px 0; 
-            font-size: 1.1em; 
+        .report-table th, 
+        .report-table td { 
+            border-bottom: 1px solid var(--border-color); 
+            border-right: 1px solid var(--border-color);  
+            padding: 8px 10px; 
+            text-align: left; 
+            font-size: 0.9em;
+            color: var(--body-fg);
+        }
+        /* Убираем правую границу у последней ячейки в строке */
+        .report-table th:last-child,
+        .report-table td:last-child {
+            border-right: none;
+        }
+        /* Если нужна левая граница для всей таблицы (первая колонка) */
+        /* 
+        .report-table th:first-child,
+        .report-table td:first-child {
+             border-left: 1px solid var(--border-color);
+        }
+        */
+        
+        .report-table thead th {
+            background-color: var(--header-bg); 
+            color: var(--header-fg);
+            font-weight: bold; 
+            position: sticky; 
+            top: 0; 
+            z-index: 1;
+        }
+
+        .report-table tbody tr {
+            background-color: var(--module-bg);
+            color: var(--body-fg);
+        }
+        
+        .report-table tbody tr:hover {
+            background-color: var(--changelist-row-hover-bg, var(--selected-row, #f0f8ff));
+        }
+
+        .report-table tbody td { 
             color: var(--body-fg); 
         }
 
-        .no-data { 
-            color: var(--text-muted-color, #666); 
-            font-style: italic; 
+        .report-table td.amount, 
+        .report-table th.amount { 
+            text-align: right; 
         }
-        .details-toggle { 
-            cursor: pointer; 
-            color: var(--link-fg); 
-            text-decoration: underline; 
-            font-size:0.9em; 
-            margin-left: 10px; 
-        }
-        .calculation-details { 
-            display: none; 
-            margin-left: 20px; 
-            border-left: 2px solid var(--hairline-color, #eee); 
-            padding-left: 10px; 
-            margin-top: 5px; 
-        }
-        .calculation-details table { 
-            font-size:0.9em; 
-            width: auto; 
-            margin-top:5px; 
-        }
-        .calculation-details th, 
-        .calculation-details td { 
-            padding: 4px 6px; 
-        }
+
+        /* Стили для ширины колонок */
+        .report-table th.col-id-calc,
+        .report-table td.col-id-calc { width: 5%; min-width: 50px; }
+
+        .report-table th.col-order-id,
+        .report-table td.col-order-id { width: 5%; min-width: 60px; }
+
+        .report-table th.col-repaired-item,
+        .report-table td.col-repaired-item { width: 15%; }
+
+        .report-table th.col-order-status,
+        .report-table td.col-order-status { width: 11%; min-width: 100px; text-align: center; }
+        
+        .report-table th.col-employee,
+        .report-table td.col-employee { width: 8%; }
+
+        .report-table th.col-amount, 
+        .report-table td.col-amount { width: 7%; min-width: 80px; }
+        
+        .report-table th.col-details,
+        .report-table td.col-details { width: auto; } /* Занимает оставшееся место */
+
+
+        /* Остальные стили */
+        .filter-form { margin-bottom: 20px; padding: 15px; background-color: var(--module-bg); border: 1px solid var(--border-color); border-radius: 4px; }
+        .filter-form label { margin-right: 5px; margin-left:10px; font-weight: bold; color: var(--body-fg); }
+        .filter-form input[type="number"], .filter-form select { min-width:70px; margin-right: 15px; padding: 6px 8px; border: 1px solid var(--input-border-color, var(--border-color)); background-color: var(--input-bg, var(--body-bg)); color: var(--input-fg, var(--body-fg)); border-radius: 3px; }
         .period-navigation { margin-bottom: 20px; text-align: center; }
-        .period-navigation a, .period-navigation span { margin: 0 10px; font-size: 1.1em; }
+        .period-navigation a, .period-navigation span { margin: 0 15px; font-size: 1.1em; padding: 5px 10px; text-decoration: none; color: var(--body-fg); }
+        .period-navigation a { color: var(--link-fg); }
+        .period-navigation a:hover { color: var(--link-hover-color, var(--link-fg)); text-decoration: underline; }
         .period-navigation .current-period { font-weight: bold; }
-        .period-form { margin-bottom: 20px; background-color: var(--body-quiet-color, #f5f5f5); padding: 10px; border-radius: 4px; }
-        .period-form label { margin-right: 5px;}
-        .period-form input[type="number"] { width: 70px; margin-right: 10px; }
-         @media (prefers-color-scheme: dark) {
-            .period-form { background-color: var(--dark-body-quiet-color, #333); }
-        }
+        .period-navigation span:not(.current-period) { color: var(--text-disabled-color, var(--body-quiet-color)); }
+        .totals-summary { margin-top:20px; padding:15px; background-color: var(--module-bg); border: 1px solid var(--border-color); border-radius: 4px; }
+        .totals-summary p { margin: 5px 0; font-size: 1em; color: var(--body-fg); }
+        .totals-summary hr { border: 0; border-top: 1px solid var(--hairline-color, var(--border-color)); margin: 10px 0; }
+        .no-data { color: var(--text-muted-color, var(--body-quiet-color)); font-style: italic; }
+        .status-badge { padding: 3px 7px; border-radius: 4px; font-weight: normal; white-space: nowrap; font-size: 0.9em; }
     </style>
 {% endblock %}
 
@@ -65,8 +106,8 @@
 
 {% block breadcrumbs %}
     <div class="breadcrumbs">
-        <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo;
-        <a href="{% url 'admin:app_list' app_label=app_label %}">Отчеты</a> &rsaquo;
+        <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> ›
+        <a href="{% url 'admin:app_list' app_label=app_label|default:'reports' %}">{% firstof opts.app_config.verbose_name app_label|capfirst|default:'Отчеты' %}</a> ›
         {{ title }}
     </div>
 {% endblock %}
@@ -75,30 +116,9 @@
 
 {% block content %}
 <div id="content-main">
-    {% if messages %}
-        <ul class="messagelist">{% for message in messages %}<li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message|capfirst }}</li>{% endfor %}</ul>
-    {% endif %}
-
-    <div class="period-form">
-        <form method="get" action="{% url 'utils:my_salary_report' %}">
-            <label for="id_month">Месяц:</label>
-            <input type="number" name="month" id="id_month" value="{{ selected_month }}" min="1" max="12">
-            <label for="id_year">Год:</label>
-            <input type="number" name="year" id="id_year" value="{{ selected_year }}" min="2020" max="2099">
-            <input type="submit" value="Показать отчет">
-        </form>
-    </div>
-
-    <div class="period-navigation">
-        <a href="{{ prev_month_url }}">&laquo; Предыдущий месяц</a>
-        <span class="current-period">{{ selected_month|stringformat:"02d" }}.{{ selected_year }}</span>
-        {% if next_month_url %}
-            <a href="{{ next_month_url }}">Следующий месяц &raquo;</a>
-        {% else %}
-            <span>Следующий месяц &raquo;</span>
-        {% endif %}
-    </div>
-
+    {% if messages %} <ul class="messagelist">{% for message in messages %}<li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message|capfirst }}</li>{% endfor %}</ul> {% endif %}
+    <div class="filter-form"> <form method="get" action="{% url 'utils:my_salary_report' %}"> <label for="id_month">Месяц:</label> <input type="number" name="month" id="id_month" value="{{ selected_month }}" min="1" max="12"> <label for="id_year">Год:</label> <input type="number" name="year" id="id_year" value="{{ selected_year }}" min="2020" max="2099"> <input type="submit" value="Показать отчет"> </form> </div>
+    <div class="period-navigation"> {% if prev_month_url %} <a href="{{ prev_month_url }}">« Предыдущий месяц</a> {% else %} <span>« Предыдущий месяц</span> {% endif %} <span class="current-period">{{ selected_month|stringformat:"02d" }}.{{ selected_year }}</span> {% if next_month_url %} <a href="{{ next_month_url }}">Следующий месяц »</a> {% else %} <span>Следующий месяц »</span> {% endif %} </div>
     <p>Отчет сформирован для сотрудника: <strong>{{ report_user_display }}</strong></p>
 
     <h2>Начисления</h2>
@@ -106,21 +126,37 @@
         <table class="report-table">
             <thead>
                 <tr>
-                    <th>ID Расчета (DEBUG)</th>
-                    <th>Заказ ID (DEBUG)</th>
-                    <th>Сотрудник (DEBUG)</th>
-                    <th class="amount">Сумма (DEBUG)</th>
-                    <th>Детали (DEBUG)</th>
+                    <th class="col-id-calc">ID Расчета</th>
+                    <th class="col-order-id">Заказ ID</th>
+                    <th class="col-repaired-item">Изделие</th>
+                    <th class="col-order-status">Статус Заказа</th>
+                    <th class="col-employee">Сотрудник</th>
+                    <th class="amount col-amount">Сумма</th>
+                    <th class="col-details">Детали</th>
                 </tr>
             </thead>
             <tbody>
                 {% for calc in salary_calculations %}
                     <tr>
-                        <td>{{ calc.id }}</td>
-                        <td>{{ calc.order_id }}</td> 
-                        <td>{{ calc.employee.username }}</td>
-                        <td class="amount">{{ calc.total_calculated_amount|floatformat:2 }}</td>
-                        <td>{% if calc.details.all %}Есть{% else %}Нет{% endif %}</td>
+                        <td class="col-id-calc">{{ calc.id }}</td>
+                        <td class="col-order-id"><a href="{% url 'admin:orders_order_change' calc.order.id %}" target="_blank">#{{ calc.order.id }}</a></td> 
+                        <td class="col-repaired-item">
+                            {% if calc.order %}
+                                {{ calc.order.repaired_item|default:"-" }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="col-order-status">
+                            {% if calc.order %}
+                                {% display_colored_status calc.order.status calc.order.get_status_display order_status_colors_map %}
+                            {% else %}
+                                <span class="no-data">Заказ удален</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-employee">{{ calc.employee.username }}</td>
+                        <td class="amount col-amount">{{ calc.total_calculated_amount|floatformat:2 }}</td>
+                        <td class="col-details">{{ calc.applied_base_rule_info|default:"-" }}</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -130,58 +166,7 @@
     {% endif %}
 
     <h2>Выплаты</h2>
-    {% if salary_payments %}
-        <table class="report-table">
-            <thead>
-                <tr>
-                    <th>ID Выплаты (DEBUG)</th>
-                    <th>Сотрудник (DEBUG)</th>
-                    <th class="amount">Сумма (DEBUG)</th>
-                    <th>Дата (DEBUG)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for payment in salary_payments %}
-                    <tr>
-                        <td>{{ payment.id }}</td>
-                        <td>{{ payment.employee.username }}</td>
-                        <td class="amount">{{ payment.amount_paid|floatformat:2 }}</td>
-                        <td>{{ payment.payment_date|date:"d.m.Y" }}</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p class="no-data">Выплат за выбранный период не найдено.</p>
-    {% endif %}
-
-    <div class="totals-summary">
-        <p><strong>Входящий остаток на начало периода ({{ selected_month|stringformat:"02d" }}.{{ selected_year }}):</strong> {{ opening_balance|floatformat:2 }} руб.</p>
-        <hr>
-        <p><strong>Итого начислено за период:</strong> {{ total_accrued_for_current_period|floatformat:2 }} руб.</p>
-        <p><strong>Итого выплачено за период:</strong> {{ total_paid_for_current_period|floatformat:2 }} руб.</p>
-        <hr>
-        <p><strong>Исходящий остаток на конец периода ({{ selected_month|stringformat:"02d" }}.{{ selected_year }}):</strong> <strong style="font-size:1.2em;">{{ closing_balance|floatformat:2 }} руб.</strong></p>
-    </div>
+    {% if salary_payments %} <table class="report-table"> <thead> <tr> <th>ID Выплаты</th> <th>Сотрудник</th> <th class="amount">Сумма</th> <th>Дата</th> </tr> </thead> <tbody> {% for payment in salary_payments %} <tr> <td>{{ payment.id }}</td> <td>{{ payment.employee.username }}</td> <td class="amount">{{ payment.amount_paid|floatformat:2 }}</td> <td>{{ payment.payment_date|date:"d.m.Y" }}</td> </tr> {% endfor %} </tbody> </table> {% else %} <p class="no-data">Выплат за выбранный период не найдено.</p> {% endif %}
+    <div class="totals-summary"> <p><strong>Входящий остаток на начало периода ({{ selected_month|stringformat:"02d" }}.{{ selected_year }}):</strong> {{ opening_balance|floatformat:2 }} руб.</p> <hr> <p><strong>Итого начислено за период:</strong> {{ total_accrued_for_current_period|floatformat:2 }} руб.</p> <p><strong>Итого выплачено за период:</strong> {{ total_paid_for_current_period|floatformat:2 }} руб.</p> <hr> <p><strong>Исходящий остаток на конец периода ({{ selected_month|stringformat:"02d" }}.{{ selected_year }}):</strong> <strong style="font-size:1.2em;">{{ closing_balance|floatformat:2 }} руб.</strong></p> </div>
 </div>
-
-<script>
-// Скрипт для toggleDetails оставляем как есть, он нам еще пригодится
-function toggleDetails(elementId) {
-    var detailsDiv = document.getElementById(elementId);
-    if (detailsDiv) {
-        if (detailsDiv.style.display === "none" || detailsDiv.style.display === "") {
-            detailsDiv.style.display = "block";
-        } else {
-            detailsDiv.style.display = "none";
-        }
-    }
-}
-document.addEventListener('DOMContentLoaded', function() {
-    var detailBlocks = document.querySelectorAll('.calculation-details');
-    detailBlocks.forEach(function(block) {
-        block.style.display = 'none'; 
-    });
-});
-</script>
 {% endblock %}

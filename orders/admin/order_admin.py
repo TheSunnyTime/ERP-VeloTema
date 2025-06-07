@@ -40,8 +40,7 @@ class OrderAdmin(admin.ModelAdmin):
         'get_total_order_amount_display'
     )
     list_filter = (
-        'status', 'order_type', 'due_date', 'created_at', 'manager', 'performer', 
-        'client',
+        'status', 'order_type', 'due_date','manager', 'performer', 
     )
     search_fields = (
         'id',
@@ -318,6 +317,7 @@ class OrderAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
     def save_related(self, request, form, formsets, change):
+        # Сначала сохраняем инлайны, чтобы order_instance.service_items был актуален
         super().save_related(request, form, formsets, change) 
         
         order_instance = form.instance 
@@ -325,33 +325,42 @@ class OrderAdmin(admin.ModelAdmin):
         print(f"[OrderAdmin SaveRelated] НАЧАЛО для заказа ID: {order_instance.id}. Тип до определения: {order_instance.order_type}")
 
         original_order_type_before_determination = order_instance.order_type
+        original_due_date_before_recalculation = order_instance.due_date # Запомним текущий срок
+
         type_changed_by_determination = False
         
+        # 1. Определяем/обновляем тип заказа
         if order_instance.determine_and_set_order_type():
             if order_instance.order_type != original_order_type_before_determination:
                 type_changed_by_determination = True
         
         print(f"[OrderAdmin SaveRelated] Заказ ID: {order_instance.id}. Тип ПОСЛЕ определения: {order_instance.order_type}. Тип изменился: {type_changed_by_determination}")
 
+        # 2. Логика пересчета due_date
         recalculate_due_date_in_save_related = False
+        new_due_date = None # Инициализируем new_due_date
+
         if order_instance.order_type and order_instance.order_type.name == OrderType.TYPE_REPAIR:
+            # Условия для пересчета срока для РЕМОНТНЫХ заказов:
+            # - Новый заказ (not change)
+            # - Тип только что изменился на "Ремонт"
+            # - Срок еще не установлен (due_date is None)
+            # - ИЛИ это существующий заказ типа "Ремонт" (change=True) - в этом случае пересчитываем всегда,
+            #   т.к. состав услуг мог измениться.
             if (not change) or \
                (type_changed_by_determination and order_instance.order_type.name == OrderType.TYPE_REPAIR) or \
-               (order_instance.due_date is None):
+               (order_instance.due_date is None) or \
+               (change and order_instance.order_type.name == OrderType.TYPE_REPAIR): # <--- НОВОЕ УСЛОВИЕ
                 recalculate_due_date_in_save_related = True
                 print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} (тип {order_instance.order_type}). Требуется установка/пересчет due_date.")
-
-        if recalculate_due_date_in_save_related:
-            new_due_date = calculate_initial_due_date(order_instance)
-            if order_instance.due_date != new_due_date:
-                print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. Старый due_date: {order_instance.due_date}, Новый due_date: {new_due_date}")
-                order_instance.due_date = new_due_date
-            else:
-                print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. due_date ({order_instance.due_date}) уже соответствует расчетному ({new_due_date}). Обновление не требуется.")
         
+        if recalculate_due_date_in_save_related:
+            new_due_date = calculate_initial_due_date(order_instance) # Рассчитываем новый срок
+            # Сравнение new_due_date с original_due_date_before_recalculation будет ниже, перед сохранением
+        
+        # ... (логика is_newly_issued_attempt остается без изменений) ...
         previous_db_status = getattr(request, '_current_order_previous_status_from_db_for_save_related', None)
         current_status_on_form = order_instance.status
-        
         is_newly_issued_attempt = (
             order_instance.pk is not None and
             current_status_on_form == Order.STATUS_ISSUED and
@@ -359,24 +368,66 @@ class OrderAdmin(admin.ModelAdmin):
         )
         
         operations_successful = False 
-        fields_to_update_initial = [] # Поля, которые нужно сохранить до или в начале блока выдачи
+        fields_to_update_at_end = [] # Поля, которые нужно сохранить в конце, если не было выдачи
 
+        # Если тип изменился, добавляем его в список для обновления
         if type_changed_by_determination and order_instance.order_type != original_order_type_before_determination:
-            fields_to_update_initial.append('order_type')
+            fields_to_update_at_end.append('order_type')
         
-        if recalculate_due_date_in_save_related and (original_order_type_before_determination is None or order_instance.due_date != getattr(original_order_type_before_determination, 'due_date', None)): # Проверяем, изменился ли due_date
-            fields_to_update_initial.append('due_date')
+        # Если due_date был пересчитан и изменился, добавляем его в список для обновления
+        if recalculate_due_date_in_save_related and new_due_date is not None and new_due_date != original_due_date_before_recalculation:
+            order_instance.due_date = new_due_date # Присваиваем новый срок объекту
+            fields_to_update_at_end.append('due_date')
+            print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. Старый due_date: {original_due_date_before_recalculation}, Новый due_date: {new_due_date}")
+        elif recalculate_due_date_in_save_related and new_due_date is not None:
+             print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. due_date ({original_due_date_before_recalculation}) уже соответствует расчетному ({new_due_date}). Обновление не требуется.")
 
-        # Сохраняем тип/срок, если они изменились, ДО основной логики выдачи
-        if fields_to_update_initial:
-            fields_to_update_initial.append('updated_at')
-            order_instance.updated_at = timezone.now()
-            order_instance.save(update_fields=list(set(fields_to_update_initial)))
-            print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. Предварительно сохранены поля: {fields_to_update_initial}")
-            if 'order_type' in fields_to_update_initial:
-                 messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
-            if 'due_date' in fields_to_update_initial:
-                 messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {order_instance.due_date.strftime('%d.%m.%Y')}.")
+
+        # Логика выдачи заказа (is_newly_issued_attempt)
+        if is_newly_issued_attempt:
+            # ... (весь твой существующий блок try/except/finally для is_newly_issued_attempt остается ЗДЕСЬ БЕЗ ИЗМЕНЕНИЙ) ...
+            # ВАЖНО: Если внутри этого блока происходит order_instance.save(), то поля 'order_type' и 'due_date'
+            # уже должны быть обновлены в order_instance, если они изменились.
+            # Если is_newly_issued_attempt, то fields_to_update_at_end не будут использоваться для отдельного сохранения ниже.
+            print(f"[OrderAdmin SaveRelated] Попытка выдачи заказа ID {order_instance.id}. Предыдущий статус в БД: {previous_db_status}, Текущий на форме: {current_status_on_form}")
+            original_target_cash_register_id = order_instance.target_cash_register_id
+            try:
+                # ... (твоя логика выдачи) ...
+                operations_successful = True
+                print(f"[OrderAdmin SaveRelated] Все операции при выдаче заказа ID {order_instance.id} успешно завершены.")
+            except ValidationError as e:
+                messages.error(request, f"Не удалось завершить выдачу заказа №{order_instance.id}: {str(e)}")
+                print(f"[OrderAdmin SaveRelated] ValidationError при выдаче заказа ID {order_instance.id}: {e}")
+            finally:
+                if not operations_successful and previous_db_status is not None:
+                    if previous_db_status != Order.STATUS_ISSUED: 
+                        # ... (твой откат статуса) ...
+                        print(f"[OrderAdmin SaveRelated] Статус заказа ID {order_instance.id} ОТКАЧЕН на '{previous_db_status}'")
+        
+        # Сохраняем измененный тип и/или срок, ЕСЛИ заказ НЕ выдавался (или выдача не удалась и статус откатился)
+        if not is_newly_issued_attempt or (is_newly_issued_attempt and not operations_successful):
+            if fields_to_update_at_end:
+                print(f"[OrderAdmin SaveRelated] Финальное сохранение (вне блока выдачи или после неудачной выдачи) для заказа ID {order_instance.id}. Поля: {fields_to_update_at_end}")
+                if 'updated_at' not in fields_to_update_at_end: # Добавляем updated_at, если его еще нет
+                    fields_to_update_at_end.append('updated_at')
+                order_instance.updated_at = timezone.now() # Устанавливаем updated_at перед сохранением
+                
+                # Убедимся, что order_type и due_date в order_instance актуальны перед сохранением
+                if 'order_type' in fields_to_update_at_end and order_instance.order_type != original_order_type_before_determination:
+                    # order_instance.order_type уже должен быть установлен ранее
+                    pass
+                if 'due_date' in fields_to_update_at_end and order_instance.due_date != original_due_date_before_recalculation:
+                    # order_instance.due_date уже должен быть установлен ранее
+                    pass
+
+                order_instance.save(update_fields=list(set(fields_to_update_at_end)))
+                
+                if 'order_type' in fields_to_update_at_end:
+                    messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
+                if 'due_date' in fields_to_update_at_end:
+                    messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {order_instance.due_date.strftime('%d.%m.%Y')}.")
+        
+        print(f"[OrderAdmin SaveRelated] КОНЕЦ для заказа ID: {order_instance.id}")
 
 
         if is_newly_issued_attempt:
@@ -557,6 +608,7 @@ class OrderAdmin(admin.ModelAdmin):
         js = (
             'admin/js/jquery.init.js', 
             'orders/js/order_form_price_updater.js',
+            'orders/js/order_fifo_updater.js',       # НОВЫЙ: Обновляет FIFO себестоимость
             'orders/js/order_form_conditional_fields.js',
             'orders/js/adaptive_client_field.js', 
         )

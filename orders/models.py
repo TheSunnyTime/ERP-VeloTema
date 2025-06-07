@@ -253,7 +253,7 @@ class OrderProductItem(models.Model):
     quantity = models.PositiveIntegerField(default=1, verbose_name="Количество")
     price_at_order = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Цена товара на момент заказа", null=True, blank=True)
     cost_price_at_sale = models.DecimalField(
-        max_digits=10, decimal_places=2, verbose_name="Себестоимость на момент продажи (FIFO)", null=True, blank=True
+        max_digits=10, decimal_places=2, verbose_name="Себестоимость (FIFO)", null=True, blank=True
     )
     class Meta:
         verbose_name = "Позиция товара в заказе"

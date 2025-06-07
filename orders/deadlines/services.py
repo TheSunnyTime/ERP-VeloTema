@@ -35,37 +35,63 @@ def calculate_due_date_based_on_overall_load(order_instance):
     complex_category_id = get_complex_service_category_id()
     days_shift = 0 
 
+    # --- НОВАЯ ПРОВЕРКА: есть ли комплексные услуги в ТЕКУЩЕМ заказе ---
+    current_order_has_complex_service = False
+    if complex_category_id is not None and order_instance.pk: # Проверяем только для существующего заказа
+        current_order_has_complex_service = order_instance.service_items.filter(
+            service__category_id=complex_category_id
+        ).exists()
+        print(f"[Deadlines SVC] Текущий заказ (ID: {order_instance.id}) содержит комплексную услугу: {current_order_has_complex_service}")
+    elif complex_category_id is not None and not order_instance.pk:
+        # Для нового, еще не сохраненного заказа, мы не можем проверить его service_items напрямую здесь.
+        # Логика определения типа и первоначального расчета срока должна это учитывать.
+        # Либо, если мы хотим, чтобы новый заказ с первой добавленной (некомплексной) услугой
+        # сразу не получал сдвиг от общей загрузки, нужно будет передавать информацию о составе услуг.
+        # Пока что, если это новый заказ, и он стал "Ремонтом", он будет подвержен общей загрузке.
+        # Это можно доработать, если нужно.
+        # Для текущей проблемы (Сценарий 2), order_instance.pk будет существовать.
+        pass
+
+
+    # Рассчитываем сдвиг от ОБЩЕЙ ЗАГРУЗКИ, как и раньше
     if complex_category_id is not None:
-        print(f"[Deadlines SVC] ID комплексной категории: {complex_category_id}")
+        # ... (код для подсчета count_overall_active_complex_orders остается тем же) ...
         active_repair_orders_with_complex_service_qs = Order.objects.filter(
             order_type__name=REPAIR_ORDER_TYPE_NAME, 
-            status__in=[
-                Order.STATUS_IN_PROGRESS, 
-                Order.STATUS_AWAITING,
-                Order.STATUS_NEW # <--- ДОБАВЛЕН СТАТУС "НОВЫЙ"
-            ], 
+            status__in=[Order.STATUS_IN_PROGRESS, Order.STATUS_AWAITING, Order.STATUS_NEW], 
             service_items__service__category_id=complex_category_id
         )
-
         if order_instance.pk:
-            print(f"[Deadlines SVC] Исключаем текущий редактируемый заказ (ID: {order_instance.pk}) из подсчета загрузки.")
             active_repair_orders_with_complex_service_qs = active_repair_orders_with_complex_service_qs.exclude(pk=order_instance.pk)
-        
         count_overall_active_complex_orders = active_repair_orders_with_complex_service_qs.distinct().count()
-        print(f"[Deadlines SVC] Найдено активных комплексных ремонтных заказов (кроме текущего, если он редактируется): {count_overall_active_complex_orders}")
-
+        
         if N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT > 0: 
-            days_shift = (count_overall_active_complex_orders // N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT) * DAYS_SHIFT_FOR_COMPLEX_LOAD
-        print(f"[Deadlines SVC] Рассчитанный сдвиг дней из-за общей загрузки: {days_shift}")
+            days_shift_from_overall_load = (count_overall_active_complex_orders // N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT) * DAYS_SHIFT_FOR_COMPLEX_LOAD
+        else:
+            days_shift_from_overall_load = 0
+        print(f"[Deadlines SVC] Рассчитанный сдвиг дней из-за ОБЩЕЙ ЗАГРУЗКИ: {days_shift_from_overall_load}")
+
+        # --- ПРИМЕНЯЕМ СДВИГ ТОЛЬКО ЕСЛИ ТЕКУЩИЙ ЗАКАЗ КОМПЛЕКСНЫЙ (если такое поведение нужно) ---
+        # Если ты хочешь, чтобы сдвиг от общей загрузки применялся ко всем ремонтам, эту проверку убери.
+        # Если сдвиг нужен только если САМ заказ содержит комплексную услугу:
+        if current_order_has_complex_service:
+            days_shift = days_shift_from_overall_load
+            print(f"[Deadlines SVC] Текущий заказ комплексный, применен сдвиг от общей загрузки: {days_shift}")
+        else:
+            days_shift = 0 # Для некомплексного ремонта сдвиг от общей загрузки не применяем
+            print(f"[Deadlines SVC] Текущий заказ НЕ комплексный, сдвиг от общей загрузки НЕ применен (days_shift = 0).")
+            # Если ты хочешь, чтобы даже некомплексные ремонты получали сдвиг от общей загрузки,
+            # то просто присвой: days_shift = days_shift_from_overall_load
+
     else:
-        print(f"[Deadlines SVC] Категория '{COMPLEX_SERVICE_CATEGORY_NAME}' не найдена или ошибка при получении ID. Сдвиг дней не рассчитывается (days_shift = 0).")
+        print(f"[Deadlines SVC] Категория '{COMPLEX_SERVICE_CATEGORY_NAME}' не найдена. Сдвиг дней не рассчитывается (days_shift = 0).")
     
     current_date = timezone.now().date()
     calculated_due_date = current_date + timedelta(days=BASE_DAYS_FOR_REPAIR_ORDER + days_shift)
     min_possible_due_date = current_date + timedelta(days=BASE_DAYS_FOR_REPAIR_ORDER)
     final_due_date = max(calculated_due_date, min_possible_due_date)
     
-    print(f"[Deadlines SVC] Базовый срок: {BASE_DAYS_FOR_REPAIR_ORDER} дней. Итоговый срок выполнения: {final_due_date}")
+    print(f"[Deadlines SVC] Базовый срок: {BASE_DAYS_FOR_REPAIR_ORDER} дней. Итоговый срок выполнения (с учетом примененного сдвига {days_shift}): {final_due_date}")
     return final_due_date
 
 

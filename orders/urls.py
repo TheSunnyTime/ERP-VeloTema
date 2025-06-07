@@ -1,6 +1,7 @@
 # orders/urls.py
 from django.urls import path
 from . import views # Импортируем views из текущего приложения orders
+from . import api_views # Предполагаем, что создадим api_views.py
 
 app_name = 'orders' # Имя пространства имен для URL-адресов этого приложения
 
@@ -10,6 +11,5 @@ urlpatterns = [
     
     # Новый URL для API определения типа заказа
     path('api/determine-order-type/', views.determine_order_type_api_view, name='api_determine_order_type'),
-    
-    # Сюда в будущем можно будет добавлять другие URL-адреса для приложения orders
+    path('calculate-fifo-cost/', api_views.calculate_fifo_cost_api_view, name='calculate_fifo_cost_api'),
 ]
