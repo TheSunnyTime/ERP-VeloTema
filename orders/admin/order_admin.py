@@ -215,46 +215,47 @@ class OrderAdmin(admin.ModelAdmin):
 
 
     def get_readonly_fields(self, request, obj=None):
-        # Базовые поля, которые часто бывают readonly
-        current_readonly_fields = ['created_at', 'updated_at', 'get_total_order_amount_display']
-        
-        # obj_to_check - это инстанс заказа, который отображается на форме
-        # Для новой формы obj будет None. Для существующей - инстанс заказа.
-        obj_to_check = obj
+        # Отладочный print, который ты добавил, оставляем, он полезен
+        print(f"[GetReadonlyFields] Called. obj: {obj}, obj.pk: {obj.pk if obj else 'N/A'}, obj.status: {obj.status if obj and obj.pk else 'N/A'}")
 
-        # По умолчанию due_date делаем readonly. Оно станет редактируемым для "Продажи".
+        current_readonly_fields = ['created_at', 'updated_at', 'get_total_order_amount_display']
         current_readonly_fields.append('due_date')
 
-        if obj_to_check and obj_to_check.pk: # Существующий заказ
-            # Менеджер readonly в зависимости от прав
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+        # Всегда работаем с объектом из БД, если он существует,
+        # чтобы избежать влияния несохраненных изменений из формы на логику readonly.
+        db_obj = None
+        if obj and obj.pk:
+            try:
+                db_obj = self.model.objects.get(pk=obj.pk)
+            except self.model.DoesNotExist:
+                # Это не должно происходить, если obj.pk существует, но на всякий случай
+                db_obj = obj # Возвращаемся к исходному obj, если не нашли в БД
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
+        # Используем db_obj для всех проверок, если он был получен
+        object_to_check = db_obj if db_obj else obj
+
+        if object_to_check and object_to_check.pk: 
             can_edit_order_manager_group_name = "Редакторы ответственных в заказах" 
             user_can_edit_manager = request.user.is_superuser or request.user.groups.filter(name=can_edit_order_manager_group_name).exists()
             if not user_can_edit_manager:
                 current_readonly_fields.append('manager')
             
-            # Если заказ выдан, большинство полей становятся readonly
-            if obj_to_check.status == Order.STATUS_ISSUED:
+            # Используем object_to_check.status (статус из БД или исходного obj)
+            if object_to_check.status == Order.STATUS_ISSUED: 
                 current_readonly_fields.extend(['status', 'payment_method_on_closure', 'client', 'manager', 'performer', 'order_type'])
-                # due_date уже добавлен в current_readonly_fields выше, так что для выданных он останется readonly
-            else: # Заказ не выдан
-                # Тип заказа readonly в зависимости от прав
+            else: 
                 if not request.user.has_perm('orders.can_change_order_type_dynamically'):
                     current_readonly_fields.append('order_type')
                 
-                # --- НАЧАЛО ИЗМЕНЕНИЙ для due_date ---
-                # Если тип заказа "Продажа", поле due_date должно быть редактируемым
-                if obj_to_check.order_type and obj_to_check.order_type.name == OrderType.TYPE_SALE:
+                if object_to_check.order_type and object_to_check.order_type.name == OrderType.TYPE_SALE:
                     if 'due_date' in current_readonly_fields:
                         current_readonly_fields.remove('due_date')
-                # Для типов "Ремонт" и "Определить" (и других) due_date остается readonly (т.к. был добавлен по умолчанию)
-                # --- КОНЕЦ ИЗМЕНЕНИЙ для due_date ---
-        else: # Новый заказ (obj is None)
-            # Для новых заказов многие поля изначально readonly или имеют спец. логику
+        else: 
             current_readonly_fields.extend(['status', 'order_type', 'payment_method_on_closure', 'target_cash_register'])
-            # due_date для нового заказа остается readonly (добавлен по умолчанию).
-            # Он станет редактируемым для типа "Продажа" после первого сохранения, когда obj уже будет существовать.
-            # Это приемлемый компромисс, т.к. тип заказа для нового объекта определяется после добавления инлайнов.
-            
+        
+        print(f"[GetReadonlyFields] Returning: {current_readonly_fields}") # Добавим этот print для отладки
         return tuple(set(current_readonly_fields))
 
 
@@ -414,8 +415,8 @@ class OrderAdmin(admin.ModelAdmin):
             print(f"[OrderAdmin SaveRelated] Попытка выдачи заказа ID {order_instance.id}. Предыдущий статус в БД: {previous_db_status}, Текущий на форме: {current_status_on_form}")
             original_target_cash_register_id = order_instance.target_cash_register_id
             try:
-                if not order_instance.payment_method_on_closure: raise ValidationError("Метод оплаты должен быть указан.")
-                if order_instance.order_type and order_instance.order_type.name == REPAIR_ORDER_TYPE_NAME and not order_instance.performer: raise ValidationError(f"Исполнитель должен быть указан для '{REPAIR_ORDER_TYPE_NAME}'.")
+                #if not order_instance.payment_method_on_closure: raise ValidationError("Метод оплаты должен быть указан.")
+                #if order_instance.order_type and order_instance.order_type.name == REPAIR_ORDER_TYPE_NAME and not order_instance.performer: raise ValidationError(f"Исполнитель должен быть указан для '{REPAIR_ORDER_TYPE_NAME}'.")
                 
                 determined_cash_register_qs = CashRegister.objects.none()
                 if order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CASH: determined_cash_register_qs = CashRegister.objects.filter(is_default_for_cash=True, is_active=True)
