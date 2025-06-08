@@ -1,7 +1,7 @@
-# F:\CRM 2.0\ERP\products\models.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# F:\CRM 2.0\ERP\products\models.py
 
 from django.db import models
-from decimal import Decimal
+from decimal import Decimal # Убедись, что Decimal импортирован
 
 class Category(models.Model):
     name = models.CharField(
@@ -40,19 +40,26 @@ class Product(models.Model):
     retail_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
+        default=Decimal('0.00'), # <--- ДОБАВЛЕН DEFAULT
         verbose_name="Розничная цена"
     )
-    # Это поле себестоимости остается в модели, но для сводных отчетов не используется.
-    # Оно может быть полезно для быстрой справки или как цена по умолчанию.
     cost_price = models.DecimalField( 
         max_digits=10,
         decimal_places=2,
+        default=Decimal('0.00'), # <--- ДОБАВЛЕН DEFAULT
         verbose_name="Себестоимость" 
     )
     stock_quantity = models.PositiveIntegerField(
-        default=0,
+        default=0, # Этот default у тебя уже был, это хорошо
         verbose_name="Остаток на складе"
     )
+    # Поле is_active, если оно нужно (по контексту проекта оно упоминалось)
+    # is_active = models.BooleanField(default=True, verbose_name="Активен")
+
+    # created_at можно добавить, если нужно отслеживать дату создания
+    # created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата последнего обновления")
+
 
     class Meta:
         verbose_name = "Товар"
@@ -62,15 +69,8 @@ class Product(models.Model):
     def __str__(self):
         return self.name
     
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата последнего обновления")
-
-    # --- СВОЙСТВА ДЛЯ РАСЧЕТА СУММ ---
     @property
     def total_retail_value_in_stock(self):
-        """
-        Рассчитывает общую розничную стоимость остатков этого товара.
-        """
         retail = self.retail_price if self.retail_price is not None else Decimal('0.00')
         quantity = self.stock_quantity if self.stock_quantity is not None else 0
         return (retail * quantity).quantize(Decimal('0.01'))
-    # --- КОНЕЦ СВОЙСТВ ---

@@ -236,49 +236,12 @@ class Supply(models.Model):
 
 
     def save(self, *args, **kwargs):
-        is_new = self.pk is None
+        # Логику вызова update_stock_on_received и _handle_cancellation ПОЛНОСТЬЮ УБРАЛИ ОТСЮДА.
+        # Атрибут _previous_status экземпляра будет устанавливаться и использоваться в SupplyAdmin.
         
-        # print(f"[Supply Save] Начало сохранения поставки #{self.pk}. "
-        #       f"Статус в объекте (перед super().save): {self.status}. "
-        #       f"_previous_status (из __init__ или последнего save): {self._previous_status}")
-
-        super().save(*args, **kwargs) # Основное сохранение объекта
-        
-        # print(f"[Supply Save] Поставка #{self.id} сохранена в БД. "
-        #       f"Текущий статус в объекте (после super().save): {self.status}")
-
-        # Логика обработки изменения статуса
-        # self.status теперь содержит НОВЫЙ статус, сохраненный в БД.
-        # self._previous_status содержит статус, который был ДО этого сохранения.
-
-        just_became_received = (self.status == self.STATUS_RECEIVED and 
-                                self._previous_status != self.STATUS_RECEIVED)
-        
-        # Учитываем также переход из STATUS_PARTIALLY_RECEIVED в STATUS_RECEIVED
-        # (хотя update_stock_on_received должен быть идемпотентным или обрабатывать дельту,
-        # но для простоты сейчас считаем, что он вызывается один раз при финальном оприходовании)
-        # Если у тебя есть логика для PARTIALLY_RECEIVED, ее нужно будет аккуратно встроить.
-        # Пока считаем, что update_stock_on_received вызывается, когда поставка становится ПОЛНОСТЬЮ RECEIVED.
-
-        just_became_cancelled = (self.status == self.STATUS_CANCELLED and 
-                                 self._previous_status != self.STATUS_CANCELLED)
-
-        if just_became_received:
-            # Проверяем, что предыдущий статус не был уже RECEIVED, чтобы избежать повторного вызова,
-            # если save вызван несколько раз без изменения статуса с RECEIVED.
-            if self._previous_status != self.STATUS_RECEIVED: # Дополнительная проверка
-                print(f"[Supply Save] Статус изменился на '{self.STATUS_RECEIVED}'. Вызов update_stock_on_received для поставки #{self.id}.")
-                self.update_stock_on_received() 
-        
-        elif just_became_cancelled:
-            # Проверяем, что предыдущий статус не был уже CANCELLED.
-            if self._previous_status != self.STATUS_CANCELLED: # Дополнительная проверка
-                print(f"[Supply Save] Статус изменился на '{self.STATUS_CANCELLED}'. Вызов _handle_cancellation для поставки #{self.id}.")
-                self._handle_cancellation()
-        
-        # Обновляем _previous_status для следующего сохранения
-        self._previous_status = self.status
-        # print(f"[Supply Save] Завершение сохранения поставки #{self.id}. _previous_status обновлен на {self._previous_status}")
+        # print(f"[Supply Save model] Сохранение Supply ID {self.pk}. Статус объекта перед super: {self.status}, _previous_status объекта: {getattr(self, '_previous_status', 'Not Set')}")
+        super().save(*args, **kwargs)
+        # print(f"[Supply Save model] Сохранено Supply ID {self.id}. Статус объекта после super: {self.status}")
 
 
 class SupplyItem(models.Model):
