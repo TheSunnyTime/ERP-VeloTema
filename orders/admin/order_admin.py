@@ -9,10 +9,12 @@ from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
 from django.utils import timezone 
 from django.utils.html import format_html
-from uiconfig.models import OrderStatusColor, OrderDueDateColorRule 
-from ..deadlines.services import calculate_initial_due_date 
 
-from ..models import Order, OrderType
+from uiconfig.models import OrderStatusColor, OrderDueDateColorRule 
+# --- ИЗМЕНЕННЫЙ ИМПОРТ ---
+from ..deadlines.services import determine_and_update_order_due_date, is_order_complex, REPAIR_ORDER_TYPE_NAME 
+
+from ..models import Order, OrderType # REPAIR_ORDER_TYPE_NAME теперь импортируется из deadlines.services
 from ..forms import OrderAdminForm
 from ..fifo_logic import calculate_and_assign_fifo_cost
 
@@ -26,6 +28,7 @@ from cash_register.models import CashRegister, CashTransaction
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
+    # ... (list_display, list_filter, etc. без изменений) ...
     form = OrderAdminForm
     list_display = (
         'id',
@@ -58,7 +61,6 @@ class OrderAdmin(admin.ModelAdmin):
 
     def __init__(self, model, admin_site):
         super().__init__(model, admin_site)
-        # Данные из БД НЕ загружаются здесь при инициализации
 
     @property
     def status_colors_map(self):
@@ -69,12 +71,8 @@ class OrderAdmin(admin.ModelAdmin):
                     for color_setting in OrderStatusColor.objects.all()
                 }
             except Exception as e:
-                # Логирование ошибки можно добавить, если используется система логирования Django
-                # import logging
-                # logger = logging.getLogger(__name__)
-                # logger.error(f"Error loading OrderStatusColor: {e}", exc_info=True)
-                print(f"Error loading OrderStatusColor: {e}") # Для простой отладки
-                self._status_colors_map_cache = {} # Возвращаем пустой словарь в случае ошибки
+                print(f"Error loading OrderStatusColor: {e}") 
+                self._status_colors_map_cache = {}
         return self._status_colors_map_cache
 
     @property
@@ -85,16 +83,13 @@ class OrderAdmin(admin.ModelAdmin):
                     OrderDueDateColorRule.objects.filter(is_active=True).order_by('priority', 'id')
                 )
             except Exception as e:
-                # import logging
-                # logger = logging.getLogger(__name__)
-                # logger.error(f"Error loading OrderDueDateColorRule: {e}", exc_info=True)
-                print(f"Error loading OrderDueDateColorRule: {e}") # Для простой отладки
-                self._due_date_color_rules_cache = [] # Возвращаем пустой список в случае ошибки
+                print(f"Error loading OrderDueDateColorRule: {e}")
+                self._due_date_color_rules_cache = []
         return self._due_date_color_rules_cache
     
     def change_view(self, request, object_id, form_url='', extra_context=None):
         extra_context = extra_context or {}
-        order = self.get_object(request, object_id) # Получаем текущий объект заказа
+        order = self.get_object(request, object_id)
         if order:
             try:
                 order_content_type = ContentType.objects.get_for_model(order)
@@ -104,35 +99,24 @@ class OrderAdmin(admin.ModelAdmin):
                 )
                 extra_context['available_document_templates'] = available_templates
                 extra_context['current_object_id'] = object_id 
-                # Добавим статус заказа, если он нужен в шаблоне для кнопок
                 extra_context['current_order_status_is_issued'] = (order.status == Order.STATUS_ISSUED)
-                print(f"[OrderAdmin change_view] Для заказа ID {object_id} найдено шаблонов: {available_templates.count()}") # Отладка
             except ContentType.DoesNotExist:
                 extra_context['available_document_templates'] = None
                 messages.warning(request, "Не удалось определить тип контента для Заказа при поиске шаблонов документов.")
-                print(f"[OrderAdmin change_view] ContentType не найден для заказа ID {object_id}") # Отладка
             except Exception as e:
                 extra_context['available_document_templates'] = None
                 messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
-                print(f"[OrderAdmin change_view] Ошибка получения шаблонов для заказа ID {object_id}: {e}") # Отладка
-        else:
-            print(f"[OrderAdmin change_view] Заказ с ID {object_id} не найден.") # Отладка
         
-        # Не забываем добавить print для всего extra_context перед вызовом super
-        print(f"[OrderAdmin change_view] extra_context передаваемый в шаблон: {extra_context}")
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
-
 
     def display_client_with_phone(self, obj):
         if obj.client:
             client_name = str(obj.client)
             phone_to_display = obj.client.phone
+            client_url = reverse('admin:clients_client_change', args=[obj.client.pk])
             if phone_to_display:
-                client_url = reverse('admin:clients_client_change', args=[obj.client.pk])
                 return format_html('<a href="{}">{} ({})</a>', client_url, client_name, phone_to_display)
-            else:
-                client_url = reverse('admin:clients_client_change', args=[obj.client.pk])
-                return format_html('<a href="{}">{}</a>', client_url, client_name)
+            return format_html('<a href="{}">{}</a>', client_url, client_name)
         return "N/A"
     display_client_with_phone.short_description = "Клиент (телефон)"
     display_client_with_phone.admin_order_field = 'client'
@@ -159,14 +143,12 @@ class OrderAdmin(admin.ModelAdmin):
     def colored_status(self, obj):
         status_key = obj.status
         display_name = obj.get_status_display()
-        # self.status_colors_map теперь является property, которое загрузит данные при первом обращении
         hex_color = self.status_colors_map.get(status_key, '#FFFFFF') 
         try:
             r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
             luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
             text_color = '#000000' if luminance > 0.5 else '#FFFFFF'
-        except:
-            text_color = '#000000' 
+        except: text_color = '#000000' 
         return format_html(
             '<span style="background-color: {}; color: {}; padding: 5px 10px; border-radius: 4px;">{}</span>',
             hex_color, text_color, display_name,
@@ -175,11 +157,9 @@ class OrderAdmin(admin.ModelAdmin):
     colored_status.admin_order_field = 'status'
 
     def get_due_date_style(self, due_date):
-        if not due_date:
-            return None
+        if not due_date: return None
         today = timezone.now().date()
         days_remaining = (due_date - today).days
-        # self.due_date_color_rules теперь является property
         for rule in self.due_date_color_rules: 
             if rule.check_condition(days_remaining):
                 hex_bg_color = rule.hex_color
@@ -187,84 +167,99 @@ class OrderAdmin(admin.ModelAdmin):
                     r, g, b = int(hex_bg_color[1:3], 16), int(hex_bg_color[3:5], 16), int(hex_bg_color[5:7], 16)
                     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
                     text_color = '#000000' if luminance > 0.5 else '#FFFFFF'
-                except:
-                    text_color = '#000000'
+                except: text_color = '#000000'
                 return {'background_color': hex_bg_color, 'text_color': text_color}
         return None
 
     def colored_due_date(self, obj):
-        if not obj.due_date:
-            return "–"
+        if obj.status == Order.STATUS_ISSUED:
+            return "–" 
+        if not obj.due_date: return "–" # Это также обработает тип "Определить", если due_date будет None
+        
         date_str = obj.due_date.strftime("%d.%m.%Y")
         style = self.get_due_date_style(obj.due_date)
         if style:
             return format_html(
                 '<span style="background-color: {}; color: {}; padding: 2px 5px; border-radius: 3px; white-space: nowrap;">{}</span>',
-                style['background_color'],
-                style['text_color'],
-                date_str
+                style['background_color'], style['text_color'], date_str
             )
         return date_str
     colored_due_date.short_description = "Срок до"
     colored_due_date.admin_order_field = 'due_date'
 
     def get_fieldsets(self, request, obj=None):
+        # ... (без изменений) ...
         main_fields_tuple = ('client', 'manager', 'performer', 'order_type', 'repaired_item', 'status', 'notes')
         payment_closure_fieldset_fields = ['payment_method_on_closure']
         if request.user.is_superuser or request.user.has_perm('orders.can_view_target_cash_register'):
             payment_closure_fieldset_fields.append('target_cash_register')
-
         date_info_fields_base = ['created_at', 'updated_at', 'due_date'] 
-
         if obj: 
             current_main_fields = list(main_fields_tuple)
             fieldsets_config = (
                 (None, {'fields': tuple(current_main_fields)}),
                 ('Оплата и закрытие заказа', {'fields': tuple(payment_closure_fieldset_fields)}),
-                ('Суммы и даты (информация)', {
-                    'fields': ('get_total_order_amount_display',) + tuple(date_info_fields_base) 
-                }),
+                ('Суммы и даты (информация)', {'fields': ('get_total_order_amount_display',) + tuple(date_info_fields_base)})
             )
             return fieldsets_config
         else: 
             new_order_main_fields = list(main_fields_tuple)
             if 'manager' in new_order_main_fields: new_order_main_fields.remove('manager')
             payment_closure_fieldset_fields_new = ['payment_method_on_closure']
-            
             fieldsets_config_new = (
                 (None, {'fields': tuple(new_order_main_fields)}),
                 ('Оплата и закрытие заказа', {'fields': tuple(payment_closure_fieldset_fields_new)}),
-                ('Суммы и даты (информация)', {
-                    'fields': ('get_total_order_amount_display',) + tuple(date_info_fields_base) 
-                }),
+                ('Суммы и даты (информация)', {'fields': ('get_total_order_amount_display',) + tuple(date_info_fields_base)})
             )
             return fieldsets_config_new
 
+
     def get_readonly_fields(self, request, obj=None):
-        base_readonly = ['created_at', 'updated_at', 'due_date', 'get_total_order_amount_display'] 
-        db_obj = None
-        if obj and obj.pk:
-            try: db_obj = self.model.objects.get(pk=obj.pk)
-            except self.model.DoesNotExist: db_obj = obj
-        else: db_obj = obj
+        # Базовые поля, которые часто бывают readonly
+        current_readonly_fields = ['created_at', 'updated_at', 'get_total_order_amount_display']
         
-        obj_to_check_status = db_obj if db_obj else obj
-        
-        if obj_to_check_status and obj_to_check_status.pk:
+        # obj_to_check - это инстанс заказа, который отображается на форме
+        # Для новой формы obj будет None. Для существующей - инстанс заказа.
+        obj_to_check = obj
+
+        # По умолчанию due_date делаем readonly. Оно станет редактируемым для "Продажи".
+        current_readonly_fields.append('due_date')
+
+        if obj_to_check and obj_to_check.pk: # Существующий заказ
+            # Менеджер readonly в зависимости от прав
             can_edit_order_manager_group_name = "Редакторы ответственных в заказах" 
             user_can_edit_manager = request.user.is_superuser or request.user.groups.filter(name=can_edit_order_manager_group_name).exists()
-            if not user_can_edit_manager: base_readonly.append('manager')
+            if not user_can_edit_manager:
+                current_readonly_fields.append('manager')
             
-            if obj_to_check_status.status == Order.STATUS_ISSUED:
-                base_readonly.extend(['status', 'payment_method_on_closure', 'client', 'manager', 'performer', 'order_type'])
-            else:
-                if not request.user.has_perm('orders.can_change_order_type_dynamically'): base_readonly.append('order_type')
-        else: 
-            base_readonly.extend(['status', 'order_type', 'payment_method_on_closure', 'target_cash_register'])
-        
-        return tuple(set(base_readonly)) 
+            # Если заказ выдан, большинство полей становятся readonly
+            if obj_to_check.status == Order.STATUS_ISSUED:
+                current_readonly_fields.extend(['status', 'payment_method_on_closure', 'client', 'manager', 'performer', 'order_type'])
+                # due_date уже добавлен в current_readonly_fields выше, так что для выданных он останется readonly
+            else: # Заказ не выдан
+                # Тип заказа readonly в зависимости от прав
+                if not request.user.has_perm('orders.can_change_order_type_dynamically'):
+                    current_readonly_fields.append('order_type')
+                
+                # --- НАЧАЛО ИЗМЕНЕНИЙ для due_date ---
+                # Если тип заказа "Продажа", поле due_date должно быть редактируемым
+                if obj_to_check.order_type and obj_to_check.order_type.name == OrderType.TYPE_SALE:
+                    if 'due_date' in current_readonly_fields:
+                        current_readonly_fields.remove('due_date')
+                # Для типов "Ремонт" и "Определить" (и других) due_date остается readonly (т.к. был добавлен по умолчанию)
+                # --- КОНЕЦ ИЗМЕНЕНИЙ для due_date ---
+        else: # Новый заказ (obj is None)
+            # Для новых заказов многие поля изначально readonly или имеют спец. логику
+            current_readonly_fields.extend(['status', 'order_type', 'payment_method_on_closure', 'target_cash_register'])
+            # due_date для нового заказа остается readonly (добавлен по умолчанию).
+            # Он станет редактируемым для типа "Продажа" после первого сохранения, когда obj уже будет существовать.
+            # Это приемлемый компромисс, т.к. тип заказа для нового объекта определяется после добавления инлайнов.
+            
+        return tuple(set(current_readonly_fields))
+
 
     def get_form(self, request, obj=None, **kwargs):
+        # ... (без изменений) ...
         if obj and obj.pk:
             try:
                 db_instance = Order.objects.get(pk=obj.pk)
@@ -285,6 +280,7 @@ class OrderAdmin(admin.ModelAdmin):
         return form
 
     def _get_or_create_salary_calculation(self, request, order_instance, employee, role_context_key, role_verbose_name):
+        # ... (без изменений) ...
         salary_calc_obj, calc_created = SalaryCalculation.objects.get_or_create(
             employee=employee, order=order_instance, role_context=role_context_key,
             defaults={
@@ -299,7 +295,9 @@ class OrderAdmin(admin.ModelAdmin):
             was_preexisting_with_amount = True
         return salary_calc_obj, calc_created, was_preexisting_with_amount
 
+
     def save_model(self, request, obj, form, change):
+        # ... (без изменений) ...
         previous_status_in_db_before_save = None
         if obj.pk:
             try:
@@ -308,57 +306,97 @@ class OrderAdmin(admin.ModelAdmin):
                 previous_status_in_db_before_save = Order.STATUS_NEW if not change else None
         else: 
             previous_status_in_db_before_save = Order.STATUS_NEW 
-        
         setattr(request, '_current_order_previous_status_from_db_for_save_related', previous_status_in_db_before_save)
-        
         if not change: 
             if not obj.manager_id: 
                 obj.manager = request.user
         super().save_model(request, obj, form, change)
 
-    def save_related(self, request, form, formsets, change):
-        # Сначала сохраняем инлайны, чтобы order_instance.service_items был актуален
-        super().save_related(request, form, formsets, change) 
-        
-        order_instance = form.instance 
-        
-        print(f"[OrderAdmin SaveRelated] НАЧАЛО для заказа ID: {order_instance.id}. Тип до определения: {order_instance.order_type}")
 
-        original_order_type_before_determination = order_instance.order_type
-        original_due_date_before_recalculation = order_instance.due_date # Запомним текущий срок
+    def save_related(self, request, form, formsets, change):
+        order_instance = form.instance 
+        print(f"[OrderAdmin SaveRelated] НАЧАЛО для заказа ID: {order_instance.id}. Change: {change}")
+
+        original_order_type_name_db = None
+        original_due_date_db = None # Это due_date из БД до всех изменений на форме и инлайнах
+        was_complex_before_save_db = False
+
+        if change and order_instance.pk:
+            try:
+                # Загружаем состояние заказа из БД *до* сохранения инлайнов
+                order_in_db = Order.objects.select_related('order_type').get(pk=order_instance.pk)
+                original_order_type_name_db = order_in_db.order_type.name if order_in_db.order_type else None
+                original_due_date_db = order_in_db.due_date
+                if original_order_type_name_db == REPAIR_ORDER_TYPE_NAME:
+                    was_complex_before_save_db = is_order_complex(order_in_db)
+                print(f"[OrderAdmin SaveRelated] Состояние из БД ДО инлайнов: Тип='{original_order_type_name_db}', Срок={original_due_date_db}, Был комплексным={was_complex_before_save_db}")
+            except Order.DoesNotExist:
+                print(f"[OrderAdmin SaveRelated] ОШИБКА: Заказ ID {order_instance.pk} не найден в БД.")
+                # Если не нашли в БД, берем значения из инстанса формы (хотя это не должно случиться для change=True)
+                original_due_date_db = order_instance.due_date 
+                if order_instance.order_type: original_order_type_name_db = order_instance.order_type.name
+        elif not change: # Новый заказ
+            print(f"[OrderAdmin SaveRelated] Новый заказ. Исходные данные: Тип=None, Срок=None, Был комплексным=False")
+            # original_order_type_name_db и original_due_date_db остаются None
+            # was_complex_before_save_db остается False
+        
+        # Сначала сохраняем инлайны, чтобы order_instance.service_items и product_items были актуальны
+        super().save_related(request, form, formsets, change) 
+        # Теперь order_instance (form.instance) содержит актуальные связанные объекты
 
         type_changed_by_determination = False
-        
-        # 1. Определяем/обновляем тип заказа
+        # Определяем тип заказа на основе текущего состава (после сохранения инлайнов)
         if order_instance.determine_and_set_order_type():
-            if order_instance.order_type != original_order_type_before_determination:
+            current_type_name_after_determination = order_instance.order_type.name if order_instance.order_type else None
+            if current_type_name_after_determination != original_order_type_name_db:
                 type_changed_by_determination = True
         
-        print(f"[OrderAdmin SaveRelated] Заказ ID: {order_instance.id}. Тип ПОСЛЕ определения: {order_instance.order_type}. Тип изменился: {type_changed_by_determination}")
+        print(f"[OrderAdmin SaveRelated] Заказ ID: {order_instance.id}. Тип ПОСЛЕ определения: {order_instance.order_type}. Тип изменился по сравнению с БД: {type_changed_by_determination}")
 
-        # 2. Логика пересчета due_date
-        recalculate_due_date_in_save_related = False
-        new_due_date = None # Инициализируем new_due_date
+        # Рассчитываем/определяем новый due_date
+        # order_instance.due_date здесь - это значение с формы, если поле было редактируемым,
+        # или старое значение, если поле было readonly.
+        new_due_date_calculated = determine_and_update_order_due_date(
+            order_instance, # Передаем инстанс с уже обновленными инлайнами и типом
+            not change,     # is_new_order
+            was_complex_before_save_db,
+            original_order_type_name_db 
+        )
+        
+        fields_to_update_at_end = []
+        if type_changed_by_determination:
+            fields_to_update_at_end.append('order_type')
+        
+        # --- НАЧАЛО ИСПРАВЛЕНИЯ ---
+        if new_due_date_calculated is not None: # Сервис вернул конкретную дату
+            if new_due_date_calculated != original_due_date_db:
+                order_instance.due_date = new_due_date_calculated
+                fields_to_update_at_end.append('due_date')
+                print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. Срок из БД: {original_due_date_db}, Новый РАССЧИТАННЫЙ/УСТАНОВЛЕННЫЙ срок: {new_due_date_calculated}")
+            else:
+                print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. Срок из БД ({original_due_date_db}) уже соответствует расчетному ({new_due_date_calculated}). Обновление не требуется.")
+        else: # new_due_date_calculated is None. Это может быть для "Определить", "Продажа" (очищено поле), или "Ремонт" (не менять)
+            if order_instance.order_type and \
+               (order_instance.order_type.name == OrderType.TYPE_UNDEFINED or order_instance.order_type.name == OrderType.TYPE_SALE):
+                # Для "Определить" и "Продажа", если сервис вернул None, значит срок должен быть None.
+                if original_due_date_db is not None: # Обновляем только если он действительно изменился на None
+                    order_instance.due_date = None
+                    fields_to_update_at_end.append('due_date')
+                    print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} (тип {order_instance.order_type.name}). Срок из БД: {original_due_date_db}, Новый срок установлен в None.")
+                else:
+                    print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} (тип {order_instance.order_type.name}). Срок уже был None и остается None.")
+            elif order_instance.order_type and order_instance.order_type.name == REPAIR_ORDER_TYPE_NAME:
+                 # Для "Ремонта", если сервис вернул None, значит "не трогать существующий срок".
+                 print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} (Ремонт). Сервис вернул None (не менять), due_date остается {original_due_date_db}.")
+            else:
+                # Случай, если тип не определен или какой-то другой, и сервис вернул None
+                if original_due_date_db is not None:
+                     order_instance.due_date = None
+                     fields_to_update_at_end.append('due_date')
+                     print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} (тип {order_instance.order_type.name if order_instance.order_type else 'N/A'}). Срок из БД: {original_due_date_db}, Новый срок установлен в None (fallback).")
 
-        if order_instance.order_type and order_instance.order_type.name == OrderType.TYPE_REPAIR:
-            # Условия для пересчета срока для РЕМОНТНЫХ заказов:
-            # - Новый заказ (not change)
-            # - Тип только что изменился на "Ремонт"
-            # - Срок еще не установлен (due_date is None)
-            # - ИЛИ это существующий заказ типа "Ремонт" (change=True) - в этом случае пересчитываем всегда,
-            #   т.к. состав услуг мог измениться.
-            if (not change) or \
-               (type_changed_by_determination and order_instance.order_type.name == OrderType.TYPE_REPAIR) or \
-               (order_instance.due_date is None) or \
-               (change and order_instance.order_type.name == OrderType.TYPE_REPAIR): # <--- НОВОЕ УСЛОВИЕ
-                recalculate_due_date_in_save_related = True
-                print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} (тип {order_instance.order_type}). Требуется установка/пересчет due_date.")
-        
-        if recalculate_due_date_in_save_related:
-            new_due_date = calculate_initial_due_date(order_instance) # Рассчитываем новый срок
-            # Сравнение new_due_date с original_due_date_before_recalculation будет ниже, перед сохранением
-        
-        # ... (логика is_newly_issued_attempt остается без изменений) ...
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
         previous_db_status = getattr(request, '_current_order_previous_status_from_db_for_save_related', None)
         current_status_on_form = order_instance.status
         is_newly_issued_attempt = (
@@ -366,78 +404,18 @@ class OrderAdmin(admin.ModelAdmin):
             current_status_on_form == Order.STATUS_ISSUED and
             (previous_db_status is None or previous_db_status != Order.STATUS_ISSUED) 
         )
-        
-        operations_successful = False 
-        fields_to_update_at_end = [] # Поля, которые нужно сохранить в конце, если не было выдачи
+        operations_successful_issue = False
 
-        # Если тип изменился, добавляем его в список для обновления
-        if type_changed_by_determination and order_instance.order_type != original_order_type_before_determination:
-            fields_to_update_at_end.append('order_type')
-        
-        # Если due_date был пересчитан и изменился, добавляем его в список для обновления
-        if recalculate_due_date_in_save_related and new_due_date is not None and new_due_date != original_due_date_before_recalculation:
-            order_instance.due_date = new_due_date # Присваиваем новый срок объекту
-            fields_to_update_at_end.append('due_date')
-            print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. Старый due_date: {original_due_date_before_recalculation}, Новый due_date: {new_due_date}")
-        elif recalculate_due_date_in_save_related and new_due_date is not None:
-             print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id}. due_date ({original_due_date_before_recalculation}) уже соответствует расчетному ({new_due_date}). Обновление не требуется.")
-
-
-        # Логика выдачи заказа (is_newly_issued_attempt)
         if is_newly_issued_attempt:
-            # ... (весь твой существующий блок try/except/finally для is_newly_issued_attempt остается ЗДЕСЬ БЕЗ ИЗМЕНЕНИЙ) ...
-            # ВАЖНО: Если внутри этого блока происходит order_instance.save(), то поля 'order_type' и 'due_date'
-            # уже должны быть обновлены в order_instance, если они изменились.
-            # Если is_newly_issued_attempt, то fields_to_update_at_end не будут использоваться для отдельного сохранения ниже.
+            # ... (весь ваш блок try/except/finally для is_newly_issued_attempt остается ЗДЕСЬ БЕЗ ИЗМЕНЕНИЙ) ...
+            # Важно: убедитесь, что order_instance.save() внутри этого блока включает 'order_type' и 'due_date',
+            # если они есть в fields_to_update_at_end, чтобы они сохранились при выдаче.
+            # Я добавил их в fields_to_save_on_issue.
             print(f"[OrderAdmin SaveRelated] Попытка выдачи заказа ID {order_instance.id}. Предыдущий статус в БД: {previous_db_status}, Текущий на форме: {current_status_on_form}")
             original_target_cash_register_id = order_instance.target_cash_register_id
             try:
-                # ... (твоя логика выдачи) ...
-                operations_successful = True
-                print(f"[OrderAdmin SaveRelated] Все операции при выдаче заказа ID {order_instance.id} успешно завершены.")
-            except ValidationError as e:
-                messages.error(request, f"Не удалось завершить выдачу заказа №{order_instance.id}: {str(e)}")
-                print(f"[OrderAdmin SaveRelated] ValidationError при выдаче заказа ID {order_instance.id}: {e}")
-            finally:
-                if not operations_successful and previous_db_status is not None:
-                    if previous_db_status != Order.STATUS_ISSUED: 
-                        # ... (твой откат статуса) ...
-                        print(f"[OrderAdmin SaveRelated] Статус заказа ID {order_instance.id} ОТКАЧЕН на '{previous_db_status}'")
-        
-        # Сохраняем измененный тип и/или срок, ЕСЛИ заказ НЕ выдавался (или выдача не удалась и статус откатился)
-        if not is_newly_issued_attempt or (is_newly_issued_attempt and not operations_successful):
-            if fields_to_update_at_end:
-                print(f"[OrderAdmin SaveRelated] Финальное сохранение (вне блока выдачи или после неудачной выдачи) для заказа ID {order_instance.id}. Поля: {fields_to_update_at_end}")
-                if 'updated_at' not in fields_to_update_at_end: # Добавляем updated_at, если его еще нет
-                    fields_to_update_at_end.append('updated_at')
-                order_instance.updated_at = timezone.now() # Устанавливаем updated_at перед сохранением
-                
-                # Убедимся, что order_type и due_date в order_instance актуальны перед сохранением
-                if 'order_type' in fields_to_update_at_end and order_instance.order_type != original_order_type_before_determination:
-                    # order_instance.order_type уже должен быть установлен ранее
-                    pass
-                if 'due_date' in fields_to_update_at_end and order_instance.due_date != original_due_date_before_recalculation:
-                    # order_instance.due_date уже должен быть установлен ранее
-                    pass
-
-                order_instance.save(update_fields=list(set(fields_to_update_at_end)))
-                
-                if 'order_type' in fields_to_update_at_end:
-                    messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
-                if 'due_date' in fields_to_update_at_end:
-                    messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {order_instance.due_date.strftime('%d.%m.%Y')}.")
-        
-        print(f"[OrderAdmin SaveRelated] КОНЕЦ для заказа ID: {order_instance.id}")
-
-
-        if is_newly_issued_attempt:
-            print(f"[OrderAdmin SaveRelated] Попытка выдачи заказа ID {order_instance.id}. Предыдущий статус в БД: {previous_db_status}, Текущий на форме: {current_status_on_form}")
-            original_target_cash_register_id = order_instance.target_cash_register_id
-
-            try:
-                print(f"[OrderAdmin SaveRelated] Проверка условий для выдачи заказа ID {order_instance.id}")
                 if not order_instance.payment_method_on_closure: raise ValidationError("Метод оплаты должен быть указан.")
-                if order_instance.order_type and order_instance.order_type.name == OrderType.TYPE_REPAIR and not order_instance.performer: raise ValidationError(f"Исполнитель должен быть указан для '{OrderType.TYPE_REPAIR}'.")
+                if order_instance.order_type and order_instance.order_type.name == REPAIR_ORDER_TYPE_NAME and not order_instance.performer: raise ValidationError(f"Исполнитель должен быть указан для '{REPAIR_ORDER_TYPE_NAME}'.")
                 
                 determined_cash_register_qs = CashRegister.objects.none()
                 if order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CASH: determined_cash_register_qs = CashRegister.objects.filter(is_default_for_cash=True, is_active=True)
@@ -445,39 +423,31 @@ class OrderAdmin(admin.ModelAdmin):
                 if not determined_cash_register_qs.exists(): raise ValidationError("Касса по умолчанию для выбранного метода оплаты не найдена.")
                 if determined_cash_register_qs.count() > 1: raise ValidationError("Найдено несколько касс по умолчанию для выбранного метода оплаты.")
                 determined_cash_register = determined_cash_register_qs.first()
-                print(f"[OrderAdmin SaveRelated] Определена касса для зачисления: {determined_cash_register}")
                 
                 current_order_total = order_instance.calculate_total_amount()
                 if not (current_order_total > Decimal('0.00')): raise ValidationError(f"Сумма заказа ({current_order_total}) должна быть > 0 для выдачи.")
-                print(f"[OrderAdmin SaveRelated] Общая сумма заказа для выдачи: {current_order_total}")
 
                 with transaction.atomic():
-                    print(f"[OrderAdmin SaveRelated] Начало транзакции для заказа ID {order_instance.id}")
+                    for item in order_instance.product_items.all():
+                        calculate_and_assign_fifo_cost(item)
+                        item.save(update_fields=['cost_price_at_sale'])
                     
-                    # FIFO и списание остатков
-                    print(f"[OrderAdmin SaveRelated - FIFO] Расчет FIFO и списание остатков для заказа ID {order_instance.id}")
-                    for item_idx, order_item_instance in enumerate(order_instance.product_items.all()):
-                        print(f"[OrderAdmin SaveRelated - FIFO] Товар {item_idx+1}: {order_item_instance.product.name}")
-                        calculate_and_assign_fifo_cost(order_item_instance)
-                        order_item_instance.save(update_fields=['cost_price_at_sale'])
-                        print(f"[OrderAdmin SaveRelated - FIFO] Себестоимость (FIFO) для {order_item_instance.product.name}: {order_item_instance.cost_price_at_sale}")
-                    
-                    for item_idx, item_to_update_stock in enumerate(order_instance.product_items.all()):
-                        print(f"[OrderAdmin SaveRelated - Stock] Списание товара {item_idx+1}: {item_to_update_stock.product.name}, кол-во: {item_to_update_stock.quantity}")
-                        product_to_update = Product.objects.select_for_update().get(pk=item_to_update_stock.product.pk)
-                        if product_to_update.stock_quantity < item_to_update_stock.quantity:
-                            raise ValidationError(f"Недостаточно общего остатка товара '{product_to_update.name}' (в наличии: {product_to_update.stock_quantity}, требуется: {item_to_update_stock.quantity})")
-                        product_to_update.stock_quantity -= item_to_update_stock.quantity
+                    for item in order_instance.product_items.all():
+                        product_to_update = Product.objects.select_for_update().get(pk=item.product.pk)
+                        if product_to_update.stock_quantity < item.quantity:
+                            raise ValidationError(f"Недостаточно общего остатка товара '{product_to_update.name}' (в наличии: {product_to_update.stock_quantity}, требуется: {item.quantity})")
+                        product_to_update.stock_quantity -= item.quantity
                         product_to_update.updated_at = timezone.now()
                         product_to_update.save(update_fields=['stock_quantity', 'updated_at'])
-                        print(f"[OrderAdmin SaveRelated - Stock] Остаток {product_to_update.name} обновлен: {product_to_update.stock_quantity}")
                     
                     order_instance.target_cash_register = determined_cash_register
-                    order_instance.updated_at = timezone.now() 
-                    # Статус 'Выдан' уже должен быть установлен в order_instance из формы
-                    # и сохранен в save_model. Здесь мы сохраняем target_cash_register и updated_at.
-                    order_instance.save(update_fields=['target_cash_register', 'updated_at']) 
-                    print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} обновлен: target_cash_register, updated_at.")
+                    order_instance.updated_at = timezone.now()
+                    
+                    fields_to_save_on_issue = ['target_cash_register', 'updated_at', 'status'] 
+                    if 'order_type' in fields_to_update_at_end: fields_to_save_on_issue.append('order_type')
+                    if 'due_date' in fields_to_update_at_end: fields_to_save_on_issue.append('due_date')
+                    order_instance.save(update_fields=list(set(fields_to_save_on_issue))) # order_instance уже содержит обновленные order_type/due_date
+                    print(f"[OrderAdmin SaveRelated] Заказ ID {order_instance.id} сохранен при выдаче. Поля: {fields_to_save_on_issue}")
 
                     if not CashTransaction.objects.filter(order=order_instance, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME).exists():
                         CashTransaction.objects.create(
@@ -489,126 +459,86 @@ class OrderAdmin(admin.ModelAdmin):
                             order=order_instance, 
                             description=f"Оплата по заказу №{order_instance.id} (статус Выдан)"
                         )
-                        print(f"[OrderAdmin SaveRelated] Создана кассовая транзакция для заказа ID {order_instance.id}")
-
-                    # --- НАЧАЛО БЛОКА РАСЧЕТА ЗАРПЛАТЫ (С ОТЛАДКОЙ) ---
-                    print(f"[OrderAdmin SaveRelated - ЗП] >>> НАЧАЛО БЛОКА РАСЧЕТА ЗАРПЛАТЫ для заказа ID: {order_instance.id}")
+                    
+                    # --- БЛОК РАСЧЕТА ЗАРПЛАТЫ (без изменений) ---
                     earners_to_process = []
-                    if order_instance.manager:
-                        print(f"[OrderAdmin SaveRelated - ЗП] Менеджер найден: {order_instance.manager.username}")
-                        earners_to_process.append({'employee_obj': order_instance.manager, 'role_key_for_rate': EmployeeRate.ROLE_MANAGER, 'role_verbose': 'Менеджер', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_MANAGER})
-                    else:
-                        print(f"[OrderAdmin SaveRelated - ЗП] Менеджер НЕ найден для заказа ID: {order_instance.id}")
-
-                    if order_instance.performer:
-                        print(f"[OrderAdmin SaveRelated - ЗП] Исполнитель найден: {order_instance.performer.username}")
-                        earners_to_process.append({'employee_obj': order_instance.performer, 'role_key_for_rate': EmployeeRate.ROLE_PERFORMER, 'role_verbose': 'Исполнитель', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_PERFORMER})
-                    else:
-                        print(f"[OrderAdmin SaveRelated - ЗП] Исполнитель НЕ найден для заказа ID: {order_instance.id}")
-
-                    print(f"[OrderAdmin SaveRelated - ЗП] Список сотрудников для обработки ЗП: {len(earners_to_process)} человек")
+                    if order_instance.manager: earners_to_process.append({'employee_obj': order_instance.manager, 'role_key_for_rate': EmployeeRate.ROLE_MANAGER, 'role_verbose': 'Менеджер', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_MANAGER})
+                    if order_instance.performer: earners_to_process.append({'employee_obj': order_instance.performer, 'role_key_for_rate': EmployeeRate.ROLE_PERFORMER, 'role_verbose': 'Исполнитель', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_PERFORMER})
                     any_salary_calculated_this_session = False
-                    for earner_info_idx, earner_info in enumerate(earners_to_process):
-                        employee = earner_info['employee_obj']
-                        role_key_for_rate = earner_info['role_key_for_rate']
-                        role_verbose_name = earner_info['role_verbose']
-                        salary_calc_context_key = earner_info['salary_calc_role_context']
-                        print(f"[OrderAdmin SaveRelated - ЗП] --- Обработка сотрудника {earner_info_idx+1}: {employee.username}, Роль: {role_verbose_name}")
-                        print(f"[OrderAdmin SaveRelated - ЗП] Тип текущего заказа: {order_instance.order_type}")
+                    for earner_info in earners_to_process:
+                        employee, role_key_for_rate, role_verbose_name, salary_calc_context_key = earner_info['employee_obj'], earner_info['role_key_for_rate'], earner_info['role_verbose'], earner_info['salary_calc_role_context']
                         employee_rate_instance = None
                         if order_instance.order_type:
-                            try:
-                                employee_rate_instance = EmployeeRate.objects.get(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True)
-                                print(f"[OrderAdmin SaveRelated - ЗП] Найдена активная ставка EmployeeRate ID {employee_rate_instance.id}: Услуги {employee_rate_instance.service_percentage}%, Прибыль с товаров {employee_rate_instance.product_profit_percentage}%")
-                            except EmployeeRate.DoesNotExist: print(f"[OrderAdmin SaveRelated - ЗП] ВНИМАНИЕ: Активная ставка EmployeeRate НЕ НАЙДЕНА для {employee.username} (Роль: {role_verbose_name}, Тип заказа: {order_instance.order_type})")
-                            except EmployeeRate.MultipleObjectsReturned: print(f"[OrderAdmin SaveRelated - ЗП] ВНИМАНИЕ: Найдено НЕСКОЛЬКО активных ставок EmployeeRate. Используется первая."); employee_rate_instance = EmployeeRate.objects.filter(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True).first()
-                        else: print(f"[OrderAdmin SaveRelated - ЗП] ВНИМАНИЕ: Тип заказа не определен, не могу найти ставку для {employee.username}")
-                        if not employee_rate_instance: messages.warning(request, f"Активная ставка для {employee.first_name or employee.username} ({role_verbose_name}) для типа заказа '{order_instance.order_type}' не найдена. ЗП не начислена."); print(f"[OrderAdmin SaveRelated - ЗП] Пропуск ЗП для {employee.username} из-за отсутствия ставки."); continue
+                            try: employee_rate_instance = EmployeeRate.objects.get(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True)
+                            except EmployeeRate.DoesNotExist: pass
+                            except EmployeeRate.MultipleObjectsReturned: employee_rate_instance = EmployeeRate.objects.filter(employee=employee, order_type=order_instance.order_type, role_in_order=role_key_for_rate, is_active=True).first()
+                        if not employee_rate_instance: messages.warning(request, f"Активная ставка для {employee.first_name or employee.username} ({role_verbose_name}) для типа заказа '{order_instance.order_type}' не найдена. ЗП не начислена."); continue
                         salary_calc_obj, sc_created, sc_preexisting_non_zero_calc = self._get_or_create_salary_calculation(request, order_instance, employee, salary_calc_context_key, role_verbose_name)
-                        print(f"[OrderAdmin SaveRelated - ЗП] SalaryCalculation для {employee.username}: {'СОЗДАН' if sc_created else 'СУЩЕСТВУЕТ (ID: '+str(salary_calc_obj.id)+')'}. Был с суммой: {sc_preexisting_non_zero_calc}")
-                        if not sc_created: print(f"[OrderAdmin SaveRelated - ЗП] Очистка старых деталей ЗП для SalaryCalculation ID: {salary_calc_obj.id}"); salary_calc_obj.service_details.all().delete(); salary_calc_obj.product_profit_details.all().delete(); salary_calc_obj.total_calculated_amount = Decimal('0.00')
+                        if not sc_created: salary_calc_obj.service_details.all().delete(); salary_calc_obj.product_profit_details.all().delete(); salary_calc_obj.total_calculated_amount = Decimal('0.00')
                         current_session_earned_total_for_role = Decimal('0.00')
-                        can_earn_from_services_for_role = True
-                        if order_instance.order_type and order_instance.order_type.name == OrderType.TYPE_SALE and role_key_for_rate == EmployeeRate.ROLE_PERFORMER: can_earn_from_services_for_role = False; print(f"[OrderAdmin SaveRelated - ЗП] Исполнитель не получает ЗП с услуг для типа заказа 'Продажа'")
+                        can_earn_from_services_for_role = not (order_instance.order_type.name == OrderType.TYPE_SALE and role_key_for_rate == EmployeeRate.ROLE_PERFORMER)
                         if can_earn_from_services_for_role and employee_rate_instance.service_percentage > Decimal('0.00'):
-                            print(f"[OrderAdmin SaveRelated - ЗП] Расчет ЗП от УСЛУГ для {employee.username}, %: {employee_rate_instance.service_percentage}")
-                            for service_item_idx, service_item in enumerate(order_instance.service_items.all()):
-                                base_amount_for_service_calc = service_item.get_item_total(); print(f"[OrderAdmin SaveRelated - ЗП] Услуга {service_item_idx+1}: '{service_item.service.name}', Сумма: {base_amount_for_service_calc}")
-                                if base_amount_for_service_calc is not None and base_amount_for_service_calc > Decimal('0.00'):
-                                    earned_from_service = (base_amount_for_service_calc * (employee_rate_instance.service_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                                    if earned_from_service > Decimal('0.00'): SalaryCalculationDetail.objects.create(salary_calculation=salary_calc_obj, order_service_item=service_item, source_description=service_item.service.name, base_amount_for_calc=base_amount_for_service_calc, applied_percentage=employee_rate_instance.service_percentage, earned_amount=earned_from_service, detail_type=f"service_{role_key_for_rate}"); current_session_earned_total_for_role += earned_from_service; print(f"[OrderAdmin SaveRelated - ЗП] +{earned_from_service} руб. от услуги '{service_item.service.name}'")
+                            for service_item in order_instance.service_items.all():
+                                base_amount = service_item.get_item_total()
+                                if base_amount > Decimal('0.00'):
+                                    earned = (base_amount * (employee_rate_instance.service_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                                    if earned > Decimal('0.00'): SalaryCalculationDetail.objects.create(salary_calculation=salary_calc_obj, order_service_item=service_item, source_description=service_item.service.name, base_amount_for_calc=base_amount, applied_percentage=employee_rate_instance.service_percentage, earned_amount=earned, detail_type=f"service_{role_key_for_rate}"); current_session_earned_total_for_role += earned
                         if employee_rate_instance.product_profit_percentage > Decimal('0.00'):
-                            print(f"[OrderAdmin SaveRelated - ЗП] Расчет ЗП от ПРИБЫЛИ С ТОВАРОВ для {employee.username}, %: {employee_rate_instance.product_profit_percentage}")
-                            for item_idx_prod, item in enumerate(order_instance.product_items.all()):
-                                print(f"[OrderAdmin SaveRelated - ЗП] Товар {item_idx_prod+1}: '{item.product.name}', Цена: {item.price_at_order}, Себест.(FIFO): {item.cost_price_at_sale}, Кол-во: {item.quantity}")
+                            for item in order_instance.product_items.all():
                                 if item.price_at_order is not None and item.cost_price_at_sale is not None and item.quantity > 0:
-                                    profit_per_unit = item.price_at_order - item.cost_price_at_sale; total_profit_for_line = profit_per_unit * item.quantity; print(f"[OrderAdmin SaveRelated - ЗП] Прибыль с '{item.product.name}': {total_profit_for_line}")
-                                    if total_profit_for_line > Decimal('0.00'):
-                                        earned_from_profit = (total_profit_for_line * (employee_rate_instance.product_profit_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                                        if earned_from_profit > Decimal('0.00'): ProductSalaryDetail.objects.create(salary_calculation=salary_calc_obj, order_product_item=item, product_name_snapshot=item.product.name, product_price_at_sale=item.price_at_order, product_cost_at_sale=item.cost_price_at_sale, profit_from_item=total_profit_for_line.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), applied_percentage=employee_rate_instance.product_profit_percentage, earned_amount=earned_from_profit); current_session_earned_total_for_role += earned_from_profit; print(f"[OrderAdmin SaveRelated - ЗП] +{earned_from_profit} руб. от прибыли с товара '{item.product.name}'")
-                                else: print(f"[OrderAdmin SaveRelated - ЗП] Пропуск прибыли для '{item.product.name}': нет цены/себест.")
-                        print(f"[OrderAdmin SaveRelated - ЗП] Итого начислено для {employee.username} в этой сессии: {current_session_earned_total_for_role}")
+                                    profit = (item.price_at_order - item.cost_price_at_sale) * item.quantity
+                                    if profit > Decimal('0.00'):
+                                        earned = (profit * (employee_rate_instance.product_profit_percentage / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                                        if earned > Decimal('0.00'): ProductSalaryDetail.objects.create(salary_calculation=salary_calc_obj, order_product_item=item, product_name_snapshot=item.product.name, product_price_at_sale=item.price_at_order, product_cost_at_sale=item.cost_price_at_sale, profit_from_item=profit.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), applied_percentage=employee_rate_instance.product_profit_percentage, earned_amount=earned); current_session_earned_total_for_role += earned
                         if current_session_earned_total_for_role > Decimal('0.00') or sc_created or (not sc_created and sc_preexisting_non_zero_calc and salary_calc_obj.total_calculated_amount != current_session_earned_total_for_role):
                             salary_calc_obj.total_calculated_amount = current_session_earned_total_for_role.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP); rule_parts = []; service_details_exist = salary_calc_obj.service_details.filter(earned_amount__gt=0).exists(); product_details_exist = salary_calc_obj.product_profit_details.filter(earned_amount__gt=0).exists()
                             if service_details_exist: rule_parts.append(f"Услуги: {employee_rate_instance.service_percentage}%")
                             if product_details_exist: rule_parts.append(f"Приб.тов.: {employee_rate_instance.product_profit_percentage}%")
                             salary_calc_obj.applied_base_rule_info = f"Ставка для {role_verbose_name} ({employee.username}) в заказе типа '{order_instance.order_type.name if order_instance.order_type else 'N/A'}': {'; '.join(rule_parts) if rule_parts else 'Ставка применена, начислений нет'}."; salary_calc_obj.calculation_type = f"Сдельная ({role_verbose_name})"; salary_calc_obj.period_date = order_instance.updated_at.date(); salary_calc_obj.save(); any_salary_calculated_this_session = True
-                            print(f"[OrderAdmin SaveRelated - ЗП] СОХРАНЕНА SalaryCalculation для {employee.username}, ID: {salary_calc_obj.id}, Сумма: {salary_calc_obj.total_calculated_amount}, Инфо: {salary_calc_obj.applied_base_rule_info}")
                             messages.success(request, f"Зарплата для {employee.first_name or employee.username} (Роль: {role_verbose_name}) по заказу #{order_instance.id} начислена/обновлена: {salary_calc_obj.total_calculated_amount} руб.")
-                        elif not sc_created and not sc_preexisting_non_zero_calc and current_session_earned_total_for_role == Decimal('0.00'): messages.info(request, f"Для {employee.first_name or employee.username} (Роль: {role_verbose_name}) по заказу #{order_instance.id} в этой сессии начислений не произведено (сумма 0)."); print(f"[OrderAdmin SaveRelated - ЗП] Для {employee.username} начислений не было (сумма 0), SalaryCalculation не обновлялся.")
-                    if any_salary_calculated_this_session: print(f"[OrderAdmin SaveRelated - ЗП] Зарплаты были начислены. Обновление updated_at для заказа ID: {order_instance.id}"); order_instance.updated_at = timezone.now(); order_instance.save(update_fields=['updated_at'])
-                    else: print(f"[OrderAdmin SaveRelated - ЗП] В этой сессии не было начислено ни одной зарплаты для заказа ID: {order_instance.id}")
-                    print(f"[OrderAdmin SaveRelated - ЗП] <<< КОНЕЦ БЛОКА РАСЧЕТА ЗАРПЛАТЫ для заказа ID: {order_instance.id}")
+                        elif not sc_created and not sc_preexisting_non_zero_calc and current_session_earned_total_for_role == Decimal('0.00'): messages.info(request, f"Для {employee.first_name or employee.username} (Роль: {role_verbose_name}) по заказу #{order_instance.id} в этой сессии начислений не произведено (сумма 0).")
+                    if any_salary_calculated_this_session: order_instance.updated_at = timezone.now(); order_instance.save(update_fields=['updated_at'])
                     # --- КОНЕЦ БЛОКА РАСЧЕТА ЗАРПЛАТЫ ---
-
-                    operations_successful = True
+                    operations_successful_issue = True
                     print(f"[OrderAdmin SaveRelated] Все операции при выдаче заказа ID {order_instance.id} успешно завершены.")
             except ValidationError as e:
                 messages.error(request, f"Не удалось завершить выдачу заказа №{order_instance.id}: {str(e)}")
-                print(f"[OrderAdmin SaveRelated] ValidationError при выдаче заказа ID {order_instance.id}: {e}")
             finally:
-                if not operations_successful and previous_db_status is not None:
+                if not operations_successful_issue and previous_db_status is not None:
                     if previous_db_status != Order.STATUS_ISSUED: 
                         Order.objects.filter(pk=order_instance.pk).update(
                             status=previous_db_status, 
                             updated_at=timezone.now(), 
-                            target_cash_register_id=original_target_cash_register_id 
+                            target_cash_register_id=original_target_cash_register_id
                         )
                         form.instance.status = previous_db_status 
-                        form.instance.target_cash_register_id = original_target_cash_register_id 
+                        form.instance.target_cash_register_id = original_target_cash_register_id
                         messages.info(request, f"Статус заказа №{order_instance.id} возвращен на '{order_instance.get_status_display_for_key(previous_db_status)}'. Операции по выдаче отменены.")
-                        print(f"[OrderAdmin SaveRelated] Статус заказа ID {order_instance.id} ОТКАЧЕН на '{previous_db_status}'")
         
-        # Сохранение типа/срока, если они менялись, и это не была операция выдачи (или она не удалась)
-        elif type_changed_by_determination or (recalculate_due_date_in_save_related and order_instance.due_date != getattr(original_order_type_before_determination, 'due_date', None) and not original_order_type_before_determination and not hasattr(original_order_type_before_determination, 'due_date')): # Уточнено условие для due_date
-             # Этот блок теперь вызывается только если НЕ is_newly_issued_attempt
-             # или если is_newly_issued_attempt, но operations_successful = False (хотя тогда откат статуса)
-             # По сути, если тип или срок изменились и заказ НЕ ВЫДАЕТСЯ УСПЕШНО.
-            fields_to_save_finally = []
-            if type_changed_by_determination and order_instance.order_type != original_order_type_before_determination:
-                fields_to_save_finally.append('order_type')
-            if recalculate_due_date_in_save_related and order_instance.due_date != getattr(original_order_type_before_determination, 'due_date', None) and not original_order_type_before_determination and not hasattr(original_order_type_before_determination, 'due_date'):
-                fields_to_save_finally.append('due_date')
-            
-            if fields_to_save_finally:
-                print(f"[OrderAdmin SaveRelated] Финальное сохранение (вне блока выдачи) для заказа ID {order_instance.id}. Поля: {fields_to_save_finally}")
-                fields_to_save_finally.append('updated_at')
+        # Сохраняем измененный тип и/или срок, ЕСЛИ заказ НЕ выдавался успешно
+        if not (is_newly_issued_attempt and operations_successful_issue):
+            if fields_to_update_at_end: # Если есть что обновлять (тип или срок)
+                print(f"[OrderAdmin SaveRelated] Финальное сохранение (вне блока успешной выдачи) для заказа ID {order_instance.id}. Поля: {fields_to_update_at_end}")
+                if 'updated_at' not in fields_to_update_at_end:
+                    fields_to_update_at_end.append('updated_at')
                 order_instance.updated_at = timezone.now()
-                order_instance.save(update_fields=list(set(fields_to_save_finally)))
-                if 'order_type' in fields_to_save_finally:
+                
+                # order_instance уже содержит обновленные значения order_type и due_date
+                order_instance.save(update_fields=list(set(fields_to_update_at_end)))
+                
+                if 'order_type' in fields_to_update_at_end:
                     messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
-                if 'due_date' in fields_to_save_finally:
-                    messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {order_instance.due_date.strftime('%d.%m.%Y')}.")
+                if 'due_date' in fields_to_update_at_end:
+                    due_date_display = order_instance.due_date.strftime('%d.%m.%Y') if order_instance.due_date else "не установлен"
+                    messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {due_date_display}.")
         
         print(f"[OrderAdmin SaveRelated] КОНЕЦ для заказа ID: {order_instance.id}")
-
-
 
     class Media:
         js = (
             'admin/js/jquery.init.js', 
             'orders/js/order_form_price_updater.js',
-            'orders/js/order_fifo_updater.js',       # НОВЫЙ: Обновляет FIFO себестоимость
+            'orders/js/order_fifo_updater.js',
             'orders/js/order_form_conditional_fields.js',
             'orders/js/adaptive_client_field.js', 
         )

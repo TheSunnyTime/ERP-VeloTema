@@ -1,10 +1,9 @@
 # orders/deadlines/services.py
 from django.utils import timezone
 from datetime import timedelta
-# Нужны импорты моделей
-from ..models import Order, OrderType, ServiceCategory # ServiceCategory теперь тоже нужна
+from ..models import Order, OrderType, ServiceCategory # Убедимся, что OrderType импортирован
 
-# --- Константы для расчета срока ---
+# --- Константы ---
 REPAIR_ORDER_TYPE_NAME = OrderType.TYPE_REPAIR 
 COMPLEX_SERVICE_CATEGORY_NAME = "Комплексное обслуживание"
 BASE_DAYS_FOR_REPAIR_ORDER = 2
@@ -23,94 +22,123 @@ def get_complex_service_category_id():
             _complex_category_id_cache = category.id
             print(f"[Deadlines SVC] Кэширован ID для '{COMPLEX_SERVICE_CATEGORY_NAME}': {_complex_category_id_cache}")
         except ServiceCategory.DoesNotExist:
-            print(f"[Deadlines SVC] ВНИМАНИЕ: Категория услуг '{COMPLEX_SERVICE_CATEGORY_NAME}' не найдена в БД! Расчет сдвига по комплексным услугам не будет работать корректно.")
+            print(f"[Deadlines SVC] ВНИМАНИЕ: Категория услуг '{COMPLEX_SERVICE_CATEGORY_NAME}' не найдена в БД!")
             _complex_category_id_cache = -1 
-    
     return _complex_category_id_cache if _complex_category_id_cache != -1 else None
 
-
-def calculate_due_date_based_on_overall_load(order_instance):
-    print(f"[Deadlines SVC] ==> calculate_due_date_based_on_overall_load для заказа ID: {order_instance.id if order_instance.pk else 'Новый (нет PK)'}")
-
+def is_order_complex(order_instance):
+    if not order_instance: return False
     complex_category_id = get_complex_service_category_id()
-    days_shift = 0 
-
-    # --- НОВАЯ ПРОВЕРКА: есть ли комплексные услуги в ТЕКУЩЕМ заказе ---
-    current_order_has_complex_service = False
-    if complex_category_id is not None and order_instance.pk: # Проверяем только для существующего заказа
-        current_order_has_complex_service = order_instance.service_items.filter(
-            service__category_id=complex_category_id
-        ).exists()
-        print(f"[Deadlines SVC] Текущий заказ (ID: {order_instance.id}) содержит комплексную услугу: {current_order_has_complex_service}")
-    elif complex_category_id is not None and not order_instance.pk:
-        # Для нового, еще не сохраненного заказа, мы не можем проверить его service_items напрямую здесь.
-        # Логика определения типа и первоначального расчета срока должна это учитывать.
-        # Либо, если мы хотим, чтобы новый заказ с первой добавленной (некомплексной) услугой
-        # сразу не получал сдвиг от общей загрузки, нужно будет передавать информацию о составе услуг.
-        # Пока что, если это новый заказ, и он стал "Ремонтом", он будет подвержен общей загрузке.
-        # Это можно доработать, если нужно.
-        # Для текущей проблемы (Сценарий 2), order_instance.pk будет существовать.
-        pass
-
-
-    # Рассчитываем сдвиг от ОБЩЕЙ ЗАГРУЗКИ, как и раньше
-    if complex_category_id is not None:
-        # ... (код для подсчета count_overall_active_complex_orders остается тем же) ...
-        active_repair_orders_with_complex_service_qs = Order.objects.filter(
-            order_type__name=REPAIR_ORDER_TYPE_NAME, 
-            status__in=[Order.STATUS_IN_PROGRESS, Order.STATUS_AWAITING, Order.STATUS_NEW], 
-            service_items__service__category_id=complex_category_id
-        )
-        if order_instance.pk:
-            active_repair_orders_with_complex_service_qs = active_repair_orders_with_complex_service_qs.exclude(pk=order_instance.pk)
-        count_overall_active_complex_orders = active_repair_orders_with_complex_service_qs.distinct().count()
-        
-        if N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT > 0: 
-            days_shift_from_overall_load = (count_overall_active_complex_orders // N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT) * DAYS_SHIFT_FOR_COMPLEX_LOAD
-        else:
-            days_shift_from_overall_load = 0
-        print(f"[Deadlines SVC] Рассчитанный сдвиг дней из-за ОБЩЕЙ ЗАГРУЗКИ: {days_shift_from_overall_load}")
-
-        # --- ПРИМЕНЯЕМ СДВИГ ТОЛЬКО ЕСЛИ ТЕКУЩИЙ ЗАКАЗ КОМПЛЕКСНЫЙ (если такое поведение нужно) ---
-        # Если ты хочешь, чтобы сдвиг от общей загрузки применялся ко всем ремонтам, эту проверку убери.
-        # Если сдвиг нужен только если САМ заказ содержит комплексную услугу:
-        if current_order_has_complex_service:
-            days_shift = days_shift_from_overall_load
-            print(f"[Deadlines SVC] Текущий заказ комплексный, применен сдвиг от общей загрузки: {days_shift}")
-        else:
-            days_shift = 0 # Для некомплексного ремонта сдвиг от общей загрузки не применяем
-            print(f"[Deadlines SVC] Текущий заказ НЕ комплексный, сдвиг от общей загрузки НЕ применен (days_shift = 0).")
-            # Если ты хочешь, чтобы даже некомплексные ремонты получали сдвиг от общей загрузки,
-            # то просто присвой: days_shift = days_shift_from_overall_load
-
-    else:
-        print(f"[Deadlines SVC] Категория '{COMPLEX_SERVICE_CATEGORY_NAME}' не найдена. Сдвиг дней не рассчитывается (days_shift = 0).")
+    if complex_category_id is None: return False
     
-    current_date = timezone.now().date()
+    if hasattr(order_instance, '_prefetched_objects_cache') and 'service_items' in order_instance._prefetched_objects_cache:
+        return any(item.service.category_id == complex_category_id for item in order_instance.service_items.all())
+    elif order_instance.pk:
+        return order_instance.service_items.filter(service__category_id=complex_category_id).exists()
+    else:
+        print(f"[Deadlines SVC is_order_complex] Заказ новый (нет PK), проверка комплексности может быть неточной.")
+        return False
+
+def _calculate_due_date_for_simple_repair(base_date=None):
+    current_date = base_date or timezone.now().date()
+    if hasattr(current_date, 'date'): current_date = current_date.date()
+    return current_date + timedelta(days=BASE_DAYS_FOR_REPAIR_ORDER)
+
+def _calculate_due_date_for_complex_repair(order_instance, base_date=None):
+    print(f"[Deadlines SVC _calc_complex_repair] для заказа ID: {order_instance.id if order_instance.pk else 'Новый'}")
+    current_date = base_date or timezone.now().date()
+    if hasattr(current_date, 'date'): current_date = current_date.date()
+    days_shift = 0
+    complex_category_id = get_complex_service_category_id()
+    if complex_category_id is not None:
+        active_repair_orders_qs = Order.objects.filter(
+            order_type__name=REPAIR_ORDER_TYPE_NAME,
+            status__in=[Order.STATUS_IN_PROGRESS, Order.STATUS_AWAITING, Order.STATUS_NEW],
+            service_items__service__category_id=complex_category_id
+        ).distinct()
+        if order_instance.pk:
+            active_repair_orders_qs = active_repair_orders_qs.exclude(pk=order_instance.pk)
+        count_overall_active_complex_orders = active_repair_orders_qs.count()
+        if N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT > 0:
+            days_shift = (count_overall_active_complex_orders // N_OVERALL_COMPLEX_ORDERS_FOR_SHIFT) * DAYS_SHIFT_FOR_COMPLEX_LOAD
+        print(f"[Deadlines SVC _calc_complex_repair] Общая загрузка: {count_overall_active_complex_orders} компл. заказов. Сдвиг: {days_shift} дней.")
+    else:
+        print(f"[Deadlines SVC _calc_complex_repair] Категория '{COMPLEX_SERVICE_CATEGORY_NAME}' не найдена. Сдвиг = 0.")
     calculated_due_date = current_date + timedelta(days=BASE_DAYS_FOR_REPAIR_ORDER + days_shift)
     min_possible_due_date = current_date + timedelta(days=BASE_DAYS_FOR_REPAIR_ORDER)
     final_due_date = max(calculated_due_date, min_possible_due_date)
-    
-    print(f"[Deadlines SVC] Базовый срок: {BASE_DAYS_FOR_REPAIR_ORDER} дней. Итоговый срок выполнения (с учетом примененного сдвига {days_shift}): {final_due_date}")
+    print(f"[Deadlines SVC _calc_complex_repair] Итоговый срок: {final_due_date}")
     return final_due_date
 
+def _calculate_fallback_due_date(order_instance):
+    base_date_for_fallback = order_instance.created_at if order_instance.created_at else timezone.now()
+    if hasattr(base_date_for_fallback, 'date'): base_date_for_fallback = base_date_for_fallback.date()
+    return base_date_for_fallback + timedelta(days=DEFAULT_FALLBACK_DUE_DAYS)
 
-def calculate_initial_due_date(order_instance):
-    print(f"[Deadlines SVC] ==> calculate_initial_due_date для заказа ID: {order_instance.id if order_instance.pk else 'Новый (нет PK)'}")
-    order_type_name_for_logic = order_instance.order_type.name if order_instance.order_type else "ТИП НЕ УСТАНОВЛЕН"
-    print(f"[Deadlines SVC] Тип заказа, полученный в calculate_initial_due_date: '{order_type_name_for_logic}'")
-    
-    if order_instance.order_type and order_instance.order_type.name == REPAIR_ORDER_TYPE_NAME:
-        print(f"[Deadlines SVC] Заказ типа '{REPAIR_ORDER_TYPE_NAME}', применяем расчет на основе загрузки.")
-        return calculate_due_date_based_on_overall_load(order_instance)
-    else:
-        print(f"[Deadlines SVC] Заказ типа '{order_type_name_for_logic}', применяем стандартный расчет срока (+{DEFAULT_FALLBACK_DUE_DAYS} дня).")
+def determine_and_update_order_due_date(order_instance, is_new_order, was_complex_before_save, original_order_type_name_before_determination):
+    print(f"[Deadlines SVC determine_and_update] Заказ ID: {order_instance.id if order_instance.pk else 'Новый'}. "
+          f"Новый: {is_new_order}, Был комплексным: {was_complex_before_save}, "
+          f"Тип до: '{original_order_type_name_before_determination}', Тип сейчас: '{order_instance.order_type.name if order_instance.order_type else 'N/A'}'")
+
+    current_order_type_name = order_instance.order_type.name if order_instance.order_type else None
+
+    # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    if current_order_type_name == OrderType.TYPE_UNDEFINED:
+        print(f"[Deadlines SVC determine_and_update] Тип '{OrderType.TYPE_UNDEFINED}'. Срок принудительно None.")
+        return None 
+
+    if current_order_type_name == OrderType.TYPE_SALE:
+        print(f"[Deadlines SVC determine_and_update] Тип '{OrderType.TYPE_SALE}'. Срок управляется вручную. Возвращаем значение из инстанса: {order_instance.due_date}.")
+        # Для "Продажи" срок берется из формы (уже в order_instance.due_date, если поле было редактируемым).
+        # Если тип только что изменился на "Продажа", и поле было readonly, order_instance.due_date содержит старое значение.
+        # Если это новый заказ "Продажа", order_instance.due_date будет None (если не установлено в форме по умолчанию).
+        return order_instance.due_date # Возвращаем текущее значение на инстансе (из формы или сохраненное)
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
+    if current_order_type_name == REPAIR_ORDER_TYPE_NAME:
+        is_complex_now = is_order_complex(order_instance)
+        print(f"[Deadlines SVC determine_and_update] Заказ '{REPAIR_ORDER_TYPE_NAME}'. Стал комплексным сейчас: {is_complex_now}")
         
-        base_date_for_fallback = order_instance.created_at if order_instance.created_at else timezone.now()
-        # Убедимся, что base_date_for_fallback это объект date, если это datetime
-        if hasattr(base_date_for_fallback, 'date'):
-            base_date_for_fallback = base_date_for_fallback.date()
-            
-        final_fallback_due_date = base_date_for_fallback + timedelta(days=DEFAULT_FALLBACK_DUE_DAYS)
-        print(f"[Deadlines SVC] Стандартный срок выполнения: {final_fallback_due_date}")
-        return final_fallback_due_date
+        base_calculation_date = order_instance.created_at if is_new_order else timezone.now()
+
+        if is_new_order:
+            if is_complex_now:
+                new_due_date = _calculate_due_date_for_complex_repair(order_instance, base_date=base_calculation_date)
+                print(f"[Deadlines SVC determine_and_update] Новый '{REPAIR_ORDER_TYPE_NAME}', комплексный. Срок: {new_due_date}")
+                return new_due_date
+            else:
+                new_due_date = _calculate_due_date_for_simple_repair(base_date=base_calculation_date)
+                print(f"[Deadlines SVC determine_and_update] Новый '{REPAIR_ORDER_TYPE_NAME}', простой. Срок: {new_due_date}")
+                return new_due_date
+        else: # Существующий заказ типа "Ремонт"
+            type_just_changed_to_repair = (original_order_type_name_before_determination != REPAIR_ORDER_TYPE_NAME and
+                                           current_order_type_name == REPAIR_ORDER_TYPE_NAME)
+
+            if not was_complex_before_save and is_complex_now:
+                new_due_date = _calculate_due_date_for_complex_repair(order_instance, base_date=base_calculation_date)
+                print(f"[Deadlines SVC determine_and_update] Существующий '{REPAIR_ORDER_TYPE_NAME}'. Стал комплексным. Новый срок: {new_due_date}")
+                return new_due_date
+            elif was_complex_before_save and not is_complex_now:
+                new_due_date = _calculate_due_date_for_simple_repair(base_date=base_calculation_date)
+                print(f"[Deadlines SVC determine_and_update] Существующий '{REPAIR_ORDER_TYPE_NAME}'. Перестал быть комплексным. Новый срок: {new_due_date}")
+                return new_due_date
+            elif was_complex_before_save and is_complex_now:
+                print(f"[Deadlines SVC determine_and_update] Существующий '{REPAIR_ORDER_TYPE_NAME}'. Был и остался комплексным. Срок НЕ меняется.")
+                return None
+            elif not was_complex_before_save and not is_complex_now:
+                if type_just_changed_to_repair:
+                    new_due_date = _calculate_due_date_for_simple_repair(base_date=base_calculation_date)
+                    print(f"[Deadlines SVC determine_and_update] Существующий. Тип только что стал '{REPAIR_ORDER_TYPE_NAME}' (простой). Новый срок: {new_due_date}")
+                    return new_due_date
+                print(f"[Deadlines SVC determine_and_update] Существующий '{REPAIR_ORDER_TYPE_NAME}'. Был и остался простым. Срок НЕ меняется.")
+                return None
+        return None # На всякий случай, если какая-то ветка для "Ремонта" не вернула значение
+
+    # Fallback для других типов (если такие появятся) или если тип None
+    # Эта логика сработает, если current_order_type_name не "Ремонт", не "Продажа", не "Определить".
+    if is_new_order or (original_order_type_name_before_determination != current_order_type_name):
+        new_due_date = _calculate_fallback_due_date(order_instance)
+        print(f"[Deadlines SVC determine_and_update] Тип '{current_order_type_name}' (неизвестный/прочее) или изменился. Расчет fallback: {new_due_date}")
+        return new_due_date
+        
+    return None # По умолчанию не меняем срок
