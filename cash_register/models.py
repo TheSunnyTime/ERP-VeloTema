@@ -6,8 +6,26 @@ from django.contrib.auth.models import Group
 
 # Модель ExpenseCategory (Статья расхода)
 class ExpenseCategory(models.Model):
+    # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    CATEGORY_MANDATORY = 'mandatory'
+    CATEGORY_OPTIONAL = 'optional'
+    EXPENSE_TYPE_CATEGORY_CHOICES = [
+        (CATEGORY_MANDATORY, 'Обязательные'),
+        (CATEGORY_OPTIONAL, 'Необязательные'),
+    ]
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     name = models.CharField(max_length=150, unique=True, verbose_name="Название статьи расхода")
     description = models.TextField(blank=True, null=True, verbose_name="Описание")
+    
+    # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    expense_type_category = models.CharField(
+        max_length=20,
+        choices=EXPENSE_TYPE_CATEGORY_CHOICES,
+        default=CATEGORY_OPTIONAL, # По умолчанию - необязательные, или выберите другое
+        verbose_name="Категория статьи расхода"
+    )
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     is_default_for_supply_payment = models.BooleanField(
         default=False,
@@ -23,7 +41,7 @@ class ExpenseCategory(models.Model):
     def __str__(self):
         return self.name
 
-# Модель CashRegister (Касса)
+# Модель CashRegister (Касса) - БЕЗ ИЗМЕНЕНИЙ
 class CashRegister(models.Model):
     TYPE_RETAIL_POINT = 'retail_point'
     TYPE_MAIN_ORGANIZATION = 'main_organization'
@@ -38,11 +56,9 @@ class CashRegister(models.Model):
     is_active = models.BooleanField(default=True, verbose_name="Активна")
     description = models.TextField(blank=True, null=True, verbose_name="Описание кассы")
     
-    # Флаги для касс по умолчанию из заказов
     is_default_for_cash = models.BooleanField(default=False, verbose_name="Касса по умолчанию для наличных (из заказов)")
     is_default_for_card = models.BooleanField(default=False, verbose_name="Касса по умолчанию для карт (из заказов)")
     
-    # НОВОЕ ПОЛЕ для обозначения ГКО, используемых для оплаты поставок
     is_gko_for_supply_payment = models.BooleanField(
         default=False,
         verbose_name="ГКО для оплаты поставок",
@@ -80,12 +96,11 @@ class CashRegister(models.Model):
             if CashRegister.objects.filter(is_default_for_card=True, till_type=self.TYPE_RETAIL_POINT).exclude(pk=self.pk).exists():
                 raise ValidationError({'is_default_for_card': 'Уже существует другая касса торговой точки по умолчанию для карт.'})
         
-        # Валидация для is_gko_for_supply_payment: должна быть ГКО
         if self.is_gko_for_supply_payment and self.till_type != self.TYPE_MAIN_ORGANIZATION:
             raise ValidationError({'is_gko_for_supply_payment': "Флаг 'ГКО для оплаты поставок' может быть установлен только для касс с типом 'Главная касса организации'."})
 
 
-# Модель CashTransaction (Кассовая транзакция) - остается как была
+# Модель CashTransaction (Кассовая транзакция) - БЕЗ ИЗМЕНЕНИЙ
 class CashTransaction(models.Model):
     TRANSACTION_TYPE_INCOME = 'income'; TRANSACTION_TYPE_EXPENSE = 'expense'
     TRANSACTION_TYPE_TRANSFER_OUT = 'transfer_out'; TRANSACTION_TYPE_TRANSFER_IN = 'transfer_in'
@@ -100,10 +115,10 @@ class CashTransaction(models.Model):
     ]
     cash_register = models.ForeignKey(CashRegister, on_delete=models.PROTECT, related_name='transactions', verbose_name="Касса")
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES, verbose_name="Тип транзакции")
-    payment_method = models.CharField(max_length=10, choices=PAYMENT_METHODS, verbose_name="Метод операции" ) # Убери default, если он не всегда нужен
+    payment_method = models.CharField(max_length=10, choices=PAYMENT_METHODS, verbose_name="Метод операции" )
     amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="Сумма")
     timestamp = models.DateTimeField(auto_now_add=True, verbose_name="Дата и время операции")
-    employee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='cash_transactions', verbose_name="Сотрудник") # blank=True
+    employee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='cash_transactions', verbose_name="Сотрудник")
     description = models.TextField(blank=True, null=True, verbose_name="Описание/Комментарий")
     order = models.ForeignKey('orders.Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='cash_transactions', verbose_name="Заказ (если приход от заказа)")
     expense_category = models.ForeignKey(ExpenseCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='cash_transactions', verbose_name="Статья расхода (если расход)")
@@ -120,12 +135,8 @@ class CashTransaction(models.Model):
     def __str__(self): 
         return f"{self.get_transaction_type_display()} на {self.amount} в {self.cash_register.name} ({self.timestamp.strftime('%Y-%m-%d %H:%M')})"
     
-    def save(self, *args, **kwargs): # метод save остается как был
+    def save(self, *args, **kwargs):
         is_new = self.pk is None
-        # Если это расход или перемещение (расход), и не указан сотрудник, но есть request.user (нужно передавать)
-        # if not self.employee and (self.transaction_type == self.TRANSACTION_TYPE_EXPENSE or self.transaction_type == self.TRANSACTION_TYPE_TRANSFER_OUT):
-        #    # здесь нужна логика для получения текущего пользователя, если это возможно (например, из сигнала или admin.save_model)
-        #    pass 
         super().save(*args, **kwargs)
         if is_new:
             with transaction.atomic():
@@ -135,9 +146,8 @@ class CashTransaction(models.Model):
                 elif self.transaction_type == self.TRANSACTION_TYPE_EXPENSE or self.transaction_type == self.TRANSACTION_TYPE_TRANSFER_OUT:
                     cash_reg.current_balance -= self.amount
                 cash_reg.save(update_fields=['current_balance'])
-                # print(f"Баланс кассы '{cash_reg.name}' обновлен на {self.amount} ({self.get_transaction_type_display()}). Новый баланс: {cash_reg.current_balance}")
 
-# Модель CashOverviewReportProxy - остается как была
+# Модель CashOverviewReportProxy - БЕЗ ИЗМЕНЕНИЙ
 class CashOverviewReportProxy(models.Model):
     class Meta:
         managed = False

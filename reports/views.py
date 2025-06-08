@@ -1,4 +1,4 @@
-# F:\CRM 2.0\ERP\reports\views.py (ГОТОВАЯ ВЕРСИЯ)
+# F:\CRM 2.0\ERP\reports\views.py
 
 from django.shortcuts import render
 from django.core.exceptions import PermissionDenied
@@ -10,51 +10,36 @@ from django.urls import reverse
 from django.http import HttpResponseRedirect
 from django.utils import timezone
 from decimal import Decimal
-from datetime import date, timedelta
-import datetime
+from datetime import date, timedelta # Убедимся, что date и timedelta импортированы явно
+import datetime # Оставим для ExpenseReportDateFilterForm, если он его использует неявно
 from django import forms
 
 from products.models import Product
 from salary_management.models import SalaryCalculation, SalaryPayment
+# --- ИЗМЕНЕНИЕ: Добавляем ExpenseCategory ---
 from cash_register.models import CashTransaction, ExpenseCategory
 from .models import ExpenseReportProxy, StockSummaryReportProxy
 
-# +++ ДОБАВЛЕН НОВЫЙ ИМПОРТ ИЗ СЕРВИСНОГО ФАЙЛА +++
 from .services import calculate_stock_report_data_fifo 
 
 from django.contrib import admin
 
 
-# --- ПОЛНОСТЬЮ ОБНОВЛЕННАЯ ФУНКЦИЯ stock_summary_report ---
+# --- stock_summary_report (БЕЗ ИЗМЕНЕНИЙ) ---
 @staff_member_required
 def stock_summary_report(request):
-    """
-    Отображает сводный отчет по остаткам товаров.
-    Все расчеты (себестоимость, прибыль) производятся на основе FIFO
-    с помощью сервисной функции calculate_stock_report_data_fifo.
-    """
     if not request.user.is_superuser and not request.user.has_perm('reports.view_stock_summary_report'):
         raise PermissionDenied("У тебя нет прав для просмотра этого отчета.")
-    
-    # 1. Получаем список товаров для отображения в таблице
     products_in_stock = Product.objects.filter(stock_quantity__gt=0).order_by('name')
-    
-    # 2. Вызываем сервисную функцию для получения всех расчетных данных (FIFO)
     report_data = calculate_stock_report_data_fifo()
-    
-    # 3. Готовим контекст для шаблона
     profit_calculation_hint = "(Общая розничная стоимость - Общая FIFO себестоимость)"
-
     context = {
         **admin.site.each_context(request),
         'title': 'Отчет: Сводка по остаткам товаров (FIFO)',
         'products_in_stock': products_in_stock,
-        
-        # Используем корректные данные, полученные из сервисной функции
         'total_cost_value': report_data['total_cost_fifo'],
         'total_retail_value': report_data['total_retail_value'],
         'expected_profit': report_data['expected_profit'],
-        
         'profit_calculation_hint': profit_calculation_hint,
         'app_label': 'reports',
         'opts': StockSummaryReportProxy._meta,
@@ -77,63 +62,133 @@ class ExpenseReportDateFilterForm(forms.Form):
     year = forms.ChoiceField(choices=YEAR_CHOICES, initial=current_year, label="Год", required=True)
     month = forms.ChoiceField(choices=MONTH_CHOICES, initial=current_month, label="Месяц", required=True)
 
-# --- VIEW-ФУНКЦИЯ expense_report_view (БЕЗ ИЗМЕНЕНИЙ) ---
+# --- ОБНОВЛЕННАЯ VIEW-ФУНКЦИЯ expense_report_view ---
 @staff_member_required(login_url='admin:login')
 @permission_required('reports.view_expense_report', raise_exception=True)
 def expense_report_view(request):
-    report_data_grouped = {}
+    today = timezone.now().date()
     
-    if request.GET:
-        form = ExpenseReportDateFilterForm(request.GET)
-    else:
-        initial_params = {'year': datetime.date.today().year, 'month': datetime.date.today().month}
-        form = ExpenseReportDateFilterForm(data=initial_params)
+    # --- НАЧАЛО ИЗМЕНЕНИЙ: Логика определения выбранного периода и редиректа ---
+    selected_year = request.GET.get('year')
+    selected_month = request.GET.get('month')
 
-    year_to_filter = None
-    month_to_filter = None
+    if not selected_year or not selected_month:
+        # Если параметры не заданы, используем текущий месяц и год
+        # или можно сделать редирект на предыдущий, как в отчете по ЗП, если нужно
+        default_year = today.year
+        default_month = today.month
+        # Редирект, чтобы URL всегда содержал параметры года и месяца
+        query_params = f'?year={default_year}&month={default_month}'
+        return HttpResponseRedirect(reverse('reports:expense_report') + query_params)
+
+    try:
+        year_to_filter = int(selected_year)
+        month_to_filter = int(selected_month)
+        if not (1 <= month_to_filter <= 12):
+            raise ValueError("Month out of range")
+    except (ValueError, TypeError):
+        # Если параметры некорректны, редирект на текущий месяц
+        default_year = today.year
+        default_month = today.month
+        query_params = f'?year={default_year}&month={default_month}'
+        return HttpResponseRedirect(reverse('reports:expense_report') + query_params)
+
+    form_initial = {'year': year_to_filter, 'month': month_to_filter}
+    form = ExpenseReportDateFilterForm(request.GET or form_initial) # Используем GET или initial
+
     selected_period_display = ""
-
-    if form.is_valid():
-        year_to_filter = int(form.cleaned_data['year'])
-        month_to_filter = int(form.cleaned_data['month'])
+    if form.is_valid(): # Проверяем валидность, даже если данные из URL
+        # year_to_filter и month_to_filter уже установлены из URL
         selected_period_display = f"{dict(ExpenseReportDateFilterForm.MONTH_CHOICES)[month_to_filter]} {year_to_filter}"
+    # --- КОНЕЦ ИЗМЕНЕНИЙ: Логика определения выбранного периода ---
 
-    if year_to_filter and month_to_filter:
+    mandatory_expenses_data = []
+    optional_expenses_data = []
+    total_mandatory_spent = Decimal('0.00')
+    total_optional_spent = Decimal('0.00')
+
+    if form.is_valid(): # Основная логика получения данных только если форма валидна
         transactions = CashTransaction.objects.filter(
             transaction_type=CashTransaction.TRANSACTION_TYPE_EXPENSE,
             timestamp__year=year_to_filter,
             timestamp__month=month_to_filter
         ).select_related('expense_category')
 
-        expenses_by_category = transactions.values(
+        # Обязательные расходы
+        mandatory_q = transactions.filter(
+            expense_category__expense_type_category=ExpenseCategory.CATEGORY_MANDATORY
+        ).values(
             'expense_category__name'
         ).annotate(
-            total_spent=Sum('amount')
+            total_spent_for_category=Sum('amount')
         ).order_by('expense_category__name')
-        
-        month_expenses = []
-        for item in expenses_by_category:
-            category_name = item['expense_category__name'] if item['expense_category__name'] else "Без категории"
-            month_expenses.append({
+
+        for item in mandatory_q:
+            category_name = item['expense_category__name'] if item['expense_category__name'] else "Без категории (Обяз.)"
+            amount = item['total_spent_for_category'] or Decimal('0.00')
+            mandatory_expenses_data.append({
                 'category': category_name,
-                'total': item['total_spent'] or Decimal('0.00')
+                'total': amount
             })
-        
-        if month_expenses:
-            report_data_grouped[selected_period_display] = month_expenses
+            total_mandatory_spent += amount
+
+        # Необязательные расходы
+        optional_q = transactions.filter(
+            expense_category__expense_type_category=ExpenseCategory.CATEGORY_OPTIONAL
+        ).values(
+            'expense_category__name'
+        ).annotate(
+            total_spent_for_category=Sum('amount')
+        ).order_by('expense_category__name')
+
+        for item in optional_q:
+            category_name = item['expense_category__name'] if item['expense_category__name'] else "Без категории (Необяз.)"
+            amount = item['total_spent_for_category'] or Decimal('0.00')
+            optional_expenses_data.append({
+                'category': category_name,
+                'total': amount
+            })
+            total_optional_spent += amount
             
+    # --- НАЧАЛО ИЗМЕНЕНИЙ: Логика для навигации по месяцам ---
+    current_period_start_nav = date(year_to_filter, month_to_filter, 1)
+    
+    prev_month_date_nav = current_period_start_nav - timedelta(days=1) # Последний день предыдущего месяца
+    prev_month_url = reverse('reports:expense_report') + f'?year={prev_month_date_nav.year}&month={prev_month_date_nav.month}'
+
+    next_month_first_day_nav = (current_period_start_nav + timedelta(days=32)).replace(day=1) # Первый день следующего месяца
+    show_next_month_link = True
+    if next_month_first_day_nav.year > today.year or \
+       (next_month_first_day_nav.year == today.year and next_month_first_day_nav.month > today.month):
+        show_next_month_link = False
+    
+    next_month_url = None
+    if show_next_month_link:
+        next_month_url = reverse('reports:expense_report') + f'?year={next_month_first_day_nav.year}&month={next_month_first_day_nav.month}'
+    # --- КОНЕЦ ИЗМЕНЕНИЙ: Логика для навигации по месяцам ---
+
     context = {
         **admin.site.each_context(request),
         'title': f'Отчет по расходам {("за " + selected_period_display) if selected_period_display and form.is_valid() else ""}',
         'form': form,
-        'report_data_grouped': report_data_grouped,
-        'selected_period_display': selected_period_display if form.is_valid() else "",
+        # --- ИЗМЕНЕНИЕ: Передаем новые данные в контекст ---
+        'mandatory_expenses': mandatory_expenses_data,
+        'optional_expenses': optional_expenses_data,
+        'total_mandatory_spent': total_mandatory_spent,
+        'total_optional_spent': total_optional_spent,
+        'selected_period_display': selected_period_display if form.is_valid() else "", # Для заголовка и навигации
+        'current_selected_year': year_to_filter, # Для отображения в навигации
+        'current_selected_month': month_to_filter, # Для отображения в навигации
+        'prev_month_url': prev_month_url,
+        'next_month_url': next_month_url,
+        'show_next_month_link': show_next_month_link,
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ---
         'opts': ExpenseReportProxy._meta,
         'app_label': ExpenseReportProxy._meta.app_label,
     }
     return render(request, 'admin/reports/expense_report.html', context)
 
-# --- VIEW-ФУНКЦИЯ all_employees_salary_report_view (БЕЗ ИЗМЕНЕНИЙ) ---
+# --- all_employees_salary_report_view (БЕЗ ИЗМЕНЕНИЙ) ---
 @staff_member_required
 def all_employees_salary_report_view(request):
     # ... (ваш существующий код для этого отчета остается здесь без изменений) ...

@@ -1,40 +1,127 @@
 {% extends "admin/base_site.html" %}
-{% load static admin_urls %}
+{% load static admin_urls i18n %}
 
 {% block extrastyle %}
     {{ block.super }}
     <link rel="stylesheet" type="text/css" href="{% static "admin/css/changelists.css" %}">
 <style>
-        .report-filter-container {
-            padding: 10px 0px; /* Убрал боковые отступы, т.к. module filtered их дает */
+        .report-container {
+            width: 100%;
         }
-        .report-filter-form .filter-form-row { /* Используем свой класс для ряда полей */
+
+        .report-filter-container {
+            margin-bottom: 20px; 
+            padding: 15px; 
+            background-color: var(--module-bg); 
+            border: 1px solid var(--border-color);
+            border-radius: 4px; 
+        }
+        .report-filter-form .filter-form-row {
             display: flex;
-            align-items: center; /* Выравниваем элементы по центру вертикально */
-            gap: 10px; /* Пространство между элементами в ряду */
-            margin-bottom: 10px;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 0;
         }
         .report-filter-form .filter-form-row label {
             margin-right: 5px;
             font-weight: bold;
+            color: var(--body-fg);
         }
-        /* Пустое правило для select и input[type="submit"] УДАЛЕНО */
-        
+
+        .period-navigation { 
+            margin: 20px 0; 
+            text-align: center; 
+        }
+        .period-navigation a, 
+        .period-navigation span { 
+            margin: 0 15px; 
+            font-size: 1.1em; 
+            padding: 5px 10px;
+            text-decoration: none;
+            color: var(--body-fg);
+        }
+        .period-navigation a {
+            color: var(--link-fg);
+            border-bottom: 1px solid transparent;
+        }
+        .period-navigation a:hover {
+            border-bottom-color: var(--link-hover-color, var(--link-fg));
+        }
+        .period-navigation .current-period { 
+            font-weight: bold; 
+        }
+        .period-navigation .disabled-link {
+            color: var(--text-disabled-color, var(--body-quiet-color));
+            pointer-events: none;
+            cursor: default;
+        }
+
         .report-results-container {
-            margin-top: 20px; /* Отступ перед таблицей результатов */
+            margin-top: 0;
         }
-        .report-results-container h3 { /* Стили для заголовка месяца */
-            background: var(--module-header-bg, #79aec8); /* Цвет фона из Django admin (с фолбэком) */
-            color: var(--module-header-fg, #fff); /* Цвет текста из Django admin (с фолбэком) */
+        .report-results-container h3 {
+            background: var(--header-bg);
+            color: var(--header-fg);
             padding: 8px 10px;
-            font-size: 1em; 
+            font-size: 1.1em;
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-top: 20px;
+            margin-bottom: 0; 
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }
+        .report-results-container .results table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid var(--border-color);
+            border-top: none; 
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+        .report-results-container .results th,
+        .report-results-container .results td {
+            border: 1px solid var(--border-color); 
+            padding: 8px 10px;
+            text-align: left;
+            color: var(--body-fg);
+        }
+        .report-results-container .results thead th {
+            font-weight: bold;
+            border-top: none; 
+            border-left: none;
+            border-right: none;
+        }
+        
+        .report-results-container .results tbody tr {
+            background-color: var(--module-bg);
+        }
+        .report-results-container .results tfoot td {
+            font-weight: bold; 
+            background-color: var(--module-bg);
+            color: var(--body-fg); 
+            border-top: 2px solid var(--border-color);
+            /* --- НАЧАЛО ИЗМЕНЕНИЙ: Увеличение шрифта для всех td в tfoot --- */
+            font-size: 1.1em; 
+            /* --- КОНЕЦ ИЗМЕНЕНИЙ --- */
+        }
+        /* Правило для :first-child удалено или закомментировано, так как теперь общий стиль для tfoot td */
+
+        .report-results-container .results td.amount,
+        .report-results-container .results th.amount {
+            text-align: right;
+        }
+        .no-data-message {
+            padding: 15px;
+            color: var(--body-quiet-color);
+            background-color: var(--module-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-top: 20px;
         }
     </style>
 {% endblock %}
 
-{% block coltype %}colM{% endblock %}
+{# {% block coltype %}colM{% endblock %} #}
 
 {% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} change-list report-page{% endblock %}
 
@@ -43,68 +130,122 @@
 {% endblock %}
 
 {% block content %}
-<div id="content-main">
-    <div class="module filtered" id="changelist-filter"> {# Один основной модуль для фильтра и результатов #}
-        <h2>Фильтр по дате</h2> {# Упрощенный заголовок #}
-        
-        <div class="report-filter-container">
-            <form method="get" action="" class="report-filter-form">
-                <div class="filter-form-row">
-                    <label for="{{ form.year.id_for_label }}">{{ form.year.label }}:</label>
-                    {{ form.year }}
-                    <label for="{{ form.month.id_for_label }}">{{ form.month.label }}:</label>
-                    {{ form.month }}
-                    <input type="submit" value="Показать отчет">
+<div id="content-main" class="report-container">
+    <div class="report-filter-container">
+        <form method="get" action="" class="report-filter-form">
+            <div class="filter-form-row">
+                <label for="{{ form.year.id_for_label }}">{{ form.year.label }}:</label>
+                {{ form.year }}
+                <label for="{{ form.month.id_for_label }}">{{ form.month.label }}:</label>
+                {{ form.month }}
+                <input type="submit" value="Показать отчет">
+            </div>
+            
+            {% if form.errors %}
+                <div class="errornote">
+                {% if form.errors.items|length == 1 %}Пожалуйста, исправьте ошибку ниже.{% else %}Пожалуйста, исправьте ошибки ниже.{% endif %}
                 </div>
-                
-                {% if form.errors %}
-                    <div class="errornote">
-                    {% if form.errors.items|length == 1 %}Пожалуйста, исправьте ошибку ниже.{% else %}Пожалуйста, исправьте ошибки ниже.{% endif %}
-                    </div>
-                    {{ form.non_field_errors }}
-                    {% for field in form %}
-                        {% if field.errors %}<div class="errorlist">{{ field.label_tag }}: {{ field.errors|striptags }}</div>{% endif %}
-                    {% endfor %}
-                {% endif %}
-            </form>
-        </div>
-
-        {# Результаты отчета теперь внутри того же модуля, после формы #}
-        <div class="report-results-container">
-            {% if form.is_valid and report_data_grouped %}
-                {% for month_year_key, expenses_in_month in report_data_grouped.items %}
-                    <h3>Расходы за: {{ month_year_key }}</h3> {# Используем H3 для подзаголовка месяца #}
-                    {% if expenses_in_month %}
-                        <div class="results"> {# Стандартный класс Django для контейнера таблицы результатов #}
-                            <table id="result_list">
-                                <thead>
-                                    <tr>
-                                        <th>Статья расходов</th>
-                                        <th style="text-align: right;">Сумма (руб.)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for item in expenses_in_month %}
-                                        <tr class="{% cycle 'row1' 'row2' %}">
-                                            <td>{{ item.category }}</td>
-                                            <td style="text-align: right;">{{ item.total|floatformat:2 }}</td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <p>Нет данных о расходах за {{ month_year_key }}.</p>
-                    {% endif %}
+                {{ form.non_field_errors }}
+                {% for field in form %}
+                    {% if field.errors %}<div class="errorlist">{{ field.label_tag }}: {{ field.errors|striptags }}</div>{% endif %}
                 {% endfor %}
-            {% elif form.is_valid and not report_data_grouped %}
-                <p>Нет данных о расходах за {{ selected_period_display }}.</p>
-            {% elif not form.is_valid and request.GET %}
-                <p>Пожалуйста, выберите корректный год и месяц.</p>
-            {% else %} 
-                <p>Выберите год и месяц для формирования отчета.</p>
             {% endif %}
-        </div>
+        </form>
+    </div>
+
+    {% if form.is_valid and selected_period_display %}
+    <div class="period-navigation">
+        {% if prev_month_url %}
+            <a href="{{ prev_month_url }}">« Предыдущий месяц</a>
+        {% else %}
+            <span class="disabled-link">« Предыдущий месяц</span>
+        {% endif %}
+        
+        <span class="current-period">{{ current_selected_month|stringformat:"02d" }}.{{ current_selected_year }}</span>
+        
+        {% if show_next_month_link and next_month_url %}
+            <a href="{{ next_month_url }}">Следующий месяц »</a>
+        {% else %}
+            <span class="disabled-link">Следующий месяц »</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="report-results-container">
+        {% if form.is_valid %}
+            <h3>Обязательные расходы за {{ selected_period_display }}</h3>
+            {% if mandatory_expenses %}
+                <div class="results">
+                    <table id="mandatory_expenses_list">
+                        <thead>
+                            <tr>
+                                <th>Статья расходов</th>
+                                <th class="amount">Сумма (руб.)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in mandatory_expenses %}
+                                <tr>
+                                    <td>{{ item.category }}</td>
+                                    <td class="amount">{{ item.total|floatformat:2 }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                {# --- НАЧАЛО ИЗМЕНЕНИЙ: Убран тег <strong> --- #}
+                                <td>Итого обязательных:</td>
+                                {# --- КОНЕЦ ИЗМЕНЕНИЙ --- #}
+                                <td class="amount"><strong>{{ total_mandatory_spent|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            {% else %}
+                <p class="no-data-message">Нет обязательных расходов за {{ selected_period_display }}.</p>
+            {% endif %}
+
+            <h3>Необязательные расходы за {{ selected_period_display }}</h3>
+            {% if optional_expenses %}
+                <div class="results">
+                    <table id="optional_expenses_list">
+                        <thead>
+                            <tr>
+                                <th>Статья расходов</th>
+                                <th class="amount">Сумма (руб.)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in optional_expenses %}
+                                <tr>
+                                    <td>{{ item.category }}</td>
+                                    <td class="amount">{{ item.total|floatformat:2 }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                {# --- НАЧАЛО ИЗМЕНЕНИЙ: Убран тег <strong> --- #}
+                                <td>Итого необязательных:</td>
+                                {# --- КОНЕЦ ИЗМЕНЕНИЙ --- #}
+                                <td class="amount"><strong>{{ total_optional_spent|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            {% else %}
+                <p class="no-data-message">Нет необязательных расходов за {{ selected_period_display }}.</p>
+            {% endif %}
+            
+            {% if not mandatory_expenses and not optional_expenses and selected_period_display %}
+                 <p class="no-data-message">Нет данных о расходах за {{ selected_period_display }}.</p>
+            {% endif %}
+
+        {% elif not form.is_valid and request.GET %}
+            <p class="no-data-message">Пожалуйста, выберите корректный год и месяц, или параметры были некорректны.</p>
+        {% else %}
+            <p class="no-data-message">Выберите год и месяц для формирования отчета.</p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}
