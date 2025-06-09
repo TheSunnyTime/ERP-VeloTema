@@ -21,7 +21,7 @@ from .forms import CsvImportForm
 from .models import ProductPriceImporter, DocumentType, DocumentTemplate 
 
 from salary_management.models import SalaryCalculation, SalaryPayment
-from uiconfig.models import OrderStatusColor # <--- ДОБАВЛЕН ЭТОТ ИМПОРТ
+from uiconfig.models import OrderStatusColor 
 
 from django.utils.dateformat import DateFormat
 from django.utils.formats import get_format 
@@ -33,6 +33,7 @@ from decimal import Decimal, InvalidOperation
 
 User = get_user_model()
 
+# ... (product_csv_import_view остается без изменений) ...
 def product_csv_import_view(request):
     print("[CSV Import View] Entered view function.")
     if not request.user.has_perm('utils.can_import_product_prices') and not request.user.is_superuser:
@@ -102,6 +103,7 @@ def product_csv_import_view(request):
     try: return render(request, 'admin/utils/product_csv_import_form.html', context)
     except Exception as e_render: import traceback; traceback.print_exc(); return HttpResponseServerError(f"Ошибка на сервере при отображении страницы импорта: {e_render}")
 
+
 @login_required
 def generate_document_view(request, template_id, object_id):
     doc_template = get_object_or_404(DocumentTemplate, pk=template_id, is_active=True)
@@ -111,6 +113,7 @@ def generate_document_view(request, template_id, object_id):
         model_class = content_type_obj.model_class() 
         if model_class is None: 
             raise AttributeError(f"Не удалось определить класс модели для ContentType: {content_type_obj}")
+        
         if model_class == Order:
             related_object = get_object_or_404(
                 model_class.objects.select_related('client', 'manager', 'performer', 'order_type'), 
@@ -118,6 +121,7 @@ def generate_document_view(request, template_id, object_id):
             )
         else:
             related_object = get_object_or_404(model_class, pk=object_id)
+
     except AttributeError as e:
         error_msg = f"Ошибка определения связанной модели для типа документа '{doc_template.document_type.name}': {e}"
         messages.error(request, error_msg)
@@ -145,29 +149,45 @@ def generate_document_view(request, template_id, object_id):
         placeholder_data['Тип_Заказа'] = str(order.order_type.name) if order.order_type else "Не определен"
         placeholder_data['Общая_Сумма_Заказа'] = f"{order.calculate_total_amount():.2f}"
         placeholder_data['Заказ_Примечания'] = str(order.notes or "")
+        
         bike_desc_match = re.search(r"Велосипед:([^\n]+)", order.notes or "", re.IGNORECASE)
         placeholder_data['Велосипед_Описание'] = bike_desc_match.group(1).strip() if bike_desc_match else ""
+
+        # --- НАЧАЛО ДОБАВЛЕНИЯ НОВЫХ ПЛЕЙСХОЛДЕРОВ ---
+        placeholder_data['Изделие'] = str(order.repaired_item or "")
+        if order.due_date:
+            placeholder_data['СрокВыполнения'] = DateFormat(order.due_date).format(get_format('SHORT_DATE_FORMAT'))
+        else:
+            placeholder_data['СрокВыполнения'] = "Не указан" 
+        # --- КОНЕЦ ДОБАВЛЕНИЯ НОВЫХ ПЛЕЙСХОЛДЕРОВ ---
+
         if order.client:
             placeholder_data['Клиент_Имя'] = str(order.client.name)
             placeholder_data['Клиент_Телефон'] = str(order.client.phone or "")
             placeholder_data['Клиент_Email'] = str(order.client.email or "")
-            placeholder_data['Клиент_Адрес'] = str(order.client.address or "#Клиент_Адрес#")
+            placeholder_data['Клиент_Адрес'] = str(order.client.address or "")
             placeholder_data['Клиент_КонтактноеЛицо'] = str(order.client.contact_person or "")
+        else: # Добавим значения по умолчанию, если клиента нет
+            placeholder_data['Клиент_Имя'] = ""
+            placeholder_data['Клиент_Телефон'] = ""
+            placeholder_data['Клиент_Email'] = ""
+            placeholder_data['Клиент_Адрес'] = ""
+            placeholder_data['Клиент_КонтактноеЛицо'] = ""
+
         if order.manager:
             employee_name_for_act = order.manager.first_name if order.manager.first_name else order.manager.username
             placeholder_data['Сотрудник_Имя_Акта'] = str(employee_name_for_act) 
             placeholder_data['Сотрудник_ФИО'] = str(order.manager.get_full_name() or order.manager.username)
-            if order.performer:
-                 placeholder_data['Исполнитель_Заказа_ФИО'] = str(order.performer.get_full_name() or order.performer.username)
-                 placeholder_data['Исполнитель_Заказа_Имя_Акта'] = str(order.performer.first_name if order.performer.first_name else order.performer.username)
-            else:
-                 placeholder_data['Исполнитель_Заказа_ФИО'] = ""
-                 placeholder_data['Исполнитель_Заказа_Имя_Акта'] = ""
         else:
             placeholder_data['Сотрудник_Имя_Акта'] = "Не назначен"
             placeholder_data['Сотрудник_ФИО'] = "Не назначен"
-            placeholder_data['Исполнитель_Заказа_ФИО'] = ""
-            placeholder_data['Исполнитель_Заказа_Имя_Акта'] = ""
+            
+        if order.performer:
+             placeholder_data['Исполнитель_Заказа_ФИО'] = str(order.performer.get_full_name() or order.performer.username)
+             placeholder_data['Исполнитель_Заказа_Имя_Акта'] = str(order.performer.first_name if order.performer.first_name else order.performer.username)
+        else:
+             placeholder_data['Исполнитель_Заказа_ФИО'] = ""
+             placeholder_data['Исполнитель_Заказа_Имя_Акта'] = ""
 
     processed_content = doc_template.template_content
     for key, value in placeholder_data.items():
@@ -184,14 +204,14 @@ def generate_document_view(request, template_id, object_id):
                 current_index += 1; row_content = item_template_str
                 row_content = row_content.replace("#Поз_Номер#", str(current_index)); row_content = row_content.replace("#Поз_Наименование#", str(p_item.product.name))
                 row_content = row_content.replace("#Поз_Артикул#", str(p_item.product.sku or "")); row_content = row_content.replace("#Поз_Количество#", f"{p_item.quantity} шт.")
-                item_price = p_item.price_at_order if p_item.price_at_order is not None else Decimal('0.00'); item_total = p_item.get_item_total() if p_item.get_item_total() is not None else Decimal('0.00')
+                item_price = p_item.price_at_order if p_item.price_at_order is not None else Decimal('0.00'); item_total = p_item.get_item_total()
                 row_content = row_content.replace("#Поз_Цена#", f"{item_price:.2f}"); row_content = row_content.replace("#Поз_Сумма#", f"{item_total:.2f}")
                 row_content = row_content.replace("#Поз_Гарантия#", "14 дн."); row_content = row_content.replace("#Поз_Скидка#", "0.00"); rendered_all_items.append(row_content)
             for s_item in order.service_items.all().select_related('service'):
                 current_index += 1; row_content = item_template_str
                 row_content = row_content.replace("#Поз_Номер#", str(current_index)); row_content = row_content.replace("#Поз_Наименование#", str(s_item.service.name))
                 row_content = row_content.replace("#Поз_Артикул#", ""); row_content = row_content.replace("#Поз_Количество#", str(s_item.quantity))
-                item_price = s_item.price_at_order if s_item.price_at_order is not None else Decimal('0.00'); item_total = s_item.get_item_total() if s_item.get_item_total() is not None else Decimal('0.00')
+                item_price = s_item.price_at_order if s_item.price_at_order is not None else Decimal('0.00'); item_total = s_item.get_item_total()
                 row_content = row_content.replace("#Поз_Цена#", f"{item_price:.2f}"); row_content = row_content.replace("#Поз_Сумма#", f"{item_total:.2f}")
                 row_content = row_content.replace("#Поз_Гарантия#", "14 дн."); row_content = row_content.replace("#Поз_Скидка#", "0.00"); rendered_all_items.append(row_content)
             processed_content = processed_content.replace(items_block_match.group(0), "\n".join(rendered_all_items))
@@ -209,6 +229,7 @@ def generate_document_view(request, template_id, object_id):
     }
     return render(request, 'admin/utils/document_preview.html', final_page_context)
 
+# ... (employee_salary_report_view, get_employee_balance_api, export_stock_levels_view остаются без изменений) ...
 def employee_salary_report_view(request):
     report_user = request.user
     today = timezone.now().date()
@@ -256,7 +277,7 @@ def employee_salary_report_view(request):
         employee=report_user, 
         period_date__year=selected_year, 
         period_date__month=selected_month
-    ).select_related('order', 'order__order_type').order_by('period_date', 'order__id') # Добавил order__order_type
+    ).select_related('order', 'order__order_type').order_by('period_date', 'order__id') 
     
     total_accrued_for_current_period_data = salary_calculations.aggregate(total=Sum('total_calculated_amount'))
     total_accrued_for_current_period = total_accrued_for_current_period_data['total'] or Decimal('0.00')
@@ -283,7 +304,6 @@ def employee_salary_report_view(request):
     if show_next_month:
         next_month_url = reverse('utils:my_salary_report') + f'?year={next_month_date.year}&month={next_month_date.month}'
 
-    # --- Получаем карту цветов для статусов заказа ---
     order_status_colors_map = {}
     try:
         order_status_colors_map = {
@@ -292,7 +312,6 @@ def employee_salary_report_view(request):
         }
     except Exception as e:
         print(f"Warning: Could not load order status colors in employee_salary_report_view: {e}")
-    # --- Конец получения карты цветов ---
 
     context = {
         **admin.site.each_context(request),
@@ -311,7 +330,7 @@ def employee_salary_report_view(request):
         'prev_month_url': prev_month_url,
         'next_month_url': next_month_url,
         'is_current_month_selected': (selected_year == today.year and selected_month == today.month),
-        'order_status_colors_map': order_status_colors_map, # <--- ПЕРЕДАЕМ КАРТУ ЦВЕТОВ В КОНТЕКСТ
+        'order_status_colors_map': order_status_colors_map, 
     }
     return render(request, 'admin/utils/employee_salary_report.html', context)
 
