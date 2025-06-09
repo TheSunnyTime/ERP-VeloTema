@@ -14,6 +14,7 @@ urlpatterns = [
     # соответствующем urls.py может использоваться и для других целей.
     path('admin/reports/', include('reports.urls', namespace='custom_reports_admin')), 
     path('admin/cash-register-reports/', include('cash_register.urls', namespace='custom_cash_register_admin')),
+    path('grafik/', include('grafik.urls', namespace='grafik')), # ДОБАВИТЬ ЭТУ СТРОКУ
     # path('admin/service-tools/', include('utils.urls', namespace='utils_admin_custom')), # Мы решили utils.urls подключать отдельно
 
     # 2. Основные URL-адреса админки Django

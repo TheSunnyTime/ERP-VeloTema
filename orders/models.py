@@ -69,11 +69,13 @@ class Order(models.Model):
     STATUS_AWAITING = 'awaiting'
     STATUS_ISSUED = 'issued'
     STATUS_CANCELLED = 'cancelled'
+    STATUS_NO_ANSWER = 'no_answer' # <--- НОВЫЙ СТАТУС
     STATUS_CHOICES = [
         (STATUS_NEW, 'Новый'),
         (STATUS_IN_PROGRESS, 'В работе'),
         (STATUS_AWAITING, 'Ожидается'),
         (STATUS_READY, 'Готов'),
+        (STATUS_NO_ANSWER, 'Недозвон'), # <--- НОВЫЙ СТАТУС (размещен перед доставкой для логики)
         (STATUS_DELIVERING, 'В доставке'),
         (STATUS_ISSUED, 'Выдан'),
         (STATUS_CANCELLED, 'Отменен'),

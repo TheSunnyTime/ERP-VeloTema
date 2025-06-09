@@ -1,0 +1,123 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <!-- Локальное подключение CSS FullCalendar -->
+    <!-- Если index.global.min.js включает стили, это может быть не нужно. -->
+    <!-- Если стили нужны отдельно, убедись, что файл существует по этому пути после сбора статики -->
+    <!-- <link href='{% static "grafik/vendor/fullcalendar/main.css" %}' rel='stylesheet' /> -->
+    <style>
+        #calendar-container {
+            padding: 20px;
+        }
+        #calendar {
+            max-width: 1100px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .fc-button {
+            background-color: var(--button-bg) !important;
+            color: var(--button-fg) !important;
+            border: 1px solid var(--button-border-color) !important;
+            text-transform: none !important;
+            box-shadow: none !important;
+        }
+        .fc-button-primary:hover {
+            background-color: var(--button-hover-bg) !important;
+        }
+        .fc-button-active {
+            background-color: var(--selected-bg) !important;
+            color: var(--selected-fg) !important;
+        }
+        .fc-toolbar-title {
+            color: var(--header-link-color);
+        }
+    </style>
+{% endblock %}
+
+{% block breadcrumbs %}
+    <div class="breadcrumbs">
+        <a href="{% url 'admin:index' %}">Главная</a> › 
+        <a href="{% url 'admin:app_list' app_label='grafik' %}">График</a> › 
+        {{ title }}
+    </div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <div id="calendar-container" data-has-permission="{{ has_permission|yesno:'true,false' }}">
+        <h1>{{ title }}</h1>
+        {% if has_permission %}
+            <div id='calendar'></div>
+        {% else %}
+            <p>У вас нет прав для просмотра этого раздела.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+    {{ block.super }}
+    <!-- Локальное подключение JS FullCalendar -->
+    <script src='{% static "grafik/vendor/fullcalendar/index.global.min.js" %}'></script>
+    <script>
+        console.log('ExtraJS block started (local FullCalendar)'); 
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOMContentLoaded event fired');
+            
+            var calendarContainer = document.getElementById('calendar-container');
+            if (!calendarContainer) {
+                console.error('Элемент calendar-container не найден!');
+                return;
+            }
+            console.log('calendarContainer найден:', calendarContainer);
+
+            var hasPermission = calendarContainer.dataset.hasPermission === 'true'; 
+            console.log('hasPermission:', hasPermission);
+
+            if (hasPermission) {
+                var calendarEl = document.getElementById('calendar');
+                console.log('calendarEl:', calendarEl); 
+
+                if (calendarEl) {
+                    try { 
+                        var calendar = new FullCalendar.Calendar(calendarEl, {
+                            initialView: 'dayGridMonth',
+                            locale: 'ru',
+                            headerToolbar: {
+                                left: 'prev,next today',
+                                center: 'title',
+                                right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+                            },
+                            buttonText: {
+                                today:    'Сегодня',
+                                month:    'Месяц',
+                                week:     'Неделя',
+                                day:      'День',
+                                list:     'Список'
+                            },
+                            editable: false,
+                            selectable: false,
+                        });
+                        console.log('FullCalendar объект создан:', calendar);
+                        calendar.render();
+                        console.log('calendar.render() вызван.');
+                    } catch (e) {
+                        console.error('Ошибка при инициализации или рендеринге FullCalendar:', e);
+                    }
+                } else {
+                    console.warn('Элемент #calendar не найден на странице, хотя права есть.');
+                }
+            } else {
+                console.info('Нет прав для отображения календаря (hasPermission is false).');
+            }
+        });
+    </script>
+{% endblock %}
