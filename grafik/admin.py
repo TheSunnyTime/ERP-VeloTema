@@ -2,16 +2,16 @@
 from django.contrib import admin
 from django.urls import path
 from .models import Shift, ColorRule, ColorAssignment
-from .admin_views import calendar_view # Импортируем наше представление
-from django.contrib.auth.models import User # <--- ДОБАВИТЬ ЭТОТ ИМПОРТ
+from .admin_views import calendar_view
+from django.contrib.auth.models import User
 
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
-    # ... (весь твой существующий код для ShiftAdmin) ...
+    # ... (весь твой существующий код для ShiftAdmin до get_urls) ...
     list_display = ('employee_name', 'date', 'start_time', 'end_time', 'duration_display', 'notes_preview', 'updated_at')
-    list_filter = ('date', 'employee') 
+    list_filter = ('date', 'employee')
     search_fields = ('employee__username', 'employee__first_name', 'employee__last_name', 'notes')
-    autocomplete_fields = ['employee'] 
+    autocomplete_fields = ['employee']
     list_select_related = ['employee']
 
     fieldsets = (
@@ -45,17 +45,18 @@ class ShiftAdmin(admin.ModelAdmin):
             return (obj.notes[:75] + '...') if len(obj.notes) > 75 else obj.notes
         return "-"
     notes_preview.short_description = "Примечания"
-    
+
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "employee":
             kwargs["queryset"] = User.objects.filter(is_active=True).order_by('last_name', 'first_name')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    # Добавляем метод для кастомных URL
     def get_urls(self):
         urls = super().get_urls()
+        # Имя для URL календаря будет 'admin:grafik_shift_calendar'
+        # Имя для URL API будет 'admin:grafik_shift_api_events'
         custom_urls = [
-            path('calendar/', self.admin_site.admin_view(calendar_view), name='grafik_shift_calendar')
+            path('calendar/', self.admin_site.admin_view(calendar_view), name='calendar'), # Django админка добавит префикс app_label_modelname
         ]
         return custom_urls + urls
 
@@ -74,13 +75,13 @@ class ColorRuleAdmin(admin.ModelAdmin):
                     hex_val = obj.hex_color.lstrip('#')
                     rgb = tuple(int(hex_val[i:i+len(hex_val)//3], 16) for i in range(0, len(hex_val), len(hex_val)//3))
                     if len(hex_val) == 3:
-                        rgb = tuple(c*17 for c in rgb) 
-                    
+                        rgb = tuple(c*17 for c in rgb)
+
                     brightness = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000
                     text_color = '#000000' if brightness > 125 else '#FFFFFF'
-                except ValueError: 
+                except ValueError:
                     text_color = '#000000'
-                
+
                 return format_html(
                     '<div style="background-color: {0}; color: {1}; padding: 5px; border-radius: 3px; text-align: center; width: 100px;">{0}</div>',
                     obj.hex_color,
@@ -97,7 +98,7 @@ class ColorRuleAdmin(admin.ModelAdmin):
 
 @admin.register(ColorAssignment)
 class ColorAssignmentAdmin(admin.ModelAdmin):
-    list_display = ('name', 'color_to_apply_display', 'priority', 'conditions_summary', 'is_active') 
+    list_display = ('name', 'color_to_apply_display', 'priority', 'conditions_summary', 'is_active')
     list_filter = ('is_active', 'assigned_group', 'day_of_week', 'applies_to_workday')
     search_fields = ('name', 'color_to_apply__name', 'assigned_employee__username', 'assigned_group__name')
     autocomplete_fields = ['color_to_apply', 'assigned_employee', 'assigned_group']
@@ -119,7 +120,7 @@ class ColorAssignmentAdmin(admin.ModelAdmin):
         if obj.color_to_apply:
             rule = obj.color_to_apply
             hex_color = rule.hex_color
-            text_color = '#000000' 
+            text_color = '#000000'
             if hex_color:
                 try:
                     hex_val = hex_color.lstrip('#')
@@ -143,10 +144,10 @@ class ColorAssignmentAdmin(admin.ModelAdmin):
         conditions = []
         if obj.assigned_employee:
             conditions.append(f"Сотр: {obj.assigned_employee.get_full_name() or obj.assigned_employee.username}")
-        elif obj.assigned_group: 
+        elif obj.assigned_group:
             conditions.append(f"Группа: {obj.assigned_group.name}")
-        
-        if obj.day_of_week is not None: 
+
+        if obj.day_of_week is not None:
             conditions.append(f"День нед: {obj.get_day_of_week_display()}")
         if obj.specific_date:
             conditions.append(f"Дата: {obj.specific_date.strftime('%d.%m.%Y')}")
@@ -154,7 +155,7 @@ class ColorAssignmentAdmin(admin.ModelAdmin):
             conditions.append("К рабочему дню")
         elif obj.applies_to_workday is False:
             conditions.append("К выходному дню")
-        
+
         summary = ", ".join(conditions)
         return (summary[:100] + '...') if len(summary) > 100 else summary or "Нет доп. условий"
     conditions_summary.short_description = "Условия"

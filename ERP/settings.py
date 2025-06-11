@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles', # Перенес сюда, к остальным django.contrib
     'django.contrib.humanize', # Добавил, если вдруг понадобится для форматирования чисел/дат
+    'django_extensions',
 
     # Ваши кастомные приложения
     'products.apps.ProductsConfig',

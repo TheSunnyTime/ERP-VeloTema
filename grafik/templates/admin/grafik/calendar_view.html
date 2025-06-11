@@ -1,122 +1,102 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 
-{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+{% block title %}Календарь смен{% endblock %}
 
 {% block extrastyle %}
     {{ block.super }}
-    <!-- Локальное подключение CSS FullCalendar -->
-    <!-- Если index.global.min.js включает стили, это может быть не нужно. -->
-    <!-- Если стили нужны отдельно, убедись, что файл существует по этому пути после сбора статики -->
-    <!-- <link href='{% static "grafik/vendor/fullcalendar/main.css" %}' rel='stylesheet' /> -->
+    {# <link rel="stylesheet" href="{% static 'grafik/vendor/fullcalendar/index.global.min.css' %}"> #}
+    
+    {# --- НАШ КАСТОМНЫЙ CSS ДЛЯ КАЛЕНДАРЯ --- #}
+    <link rel="stylesheet" href="{% static 'grafik/css/custom_calendar.css' %}">
+    
     <style>
-        #calendar-container {
-            padding: 20px;
-        }
         #calendar {
             max-width: 1100px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin: 40px auto;
         }
-        .fc-button {
-            background-color: var(--button-bg) !important;
-            color: var(--button-fg) !important;
-            border: 1px solid var(--button-border-color) !important;
-            text-transform: none !important;
-            box-shadow: none !important;
-        }
-        .fc-button-primary:hover {
-            background-color: var(--button-hover-bg) !important;
-        }
-        .fc-button-active {
-            background-color: var(--selected-bg) !important;
-            color: var(--selected-fg) !important;
-        }
-        .fc-toolbar-title {
-            color: var(--header-link-color);
-        }
+        /* Другие инлайн-стили, если они специфичны только для этой страницы и не относятся к событиям */
     </style>
 {% endblock %}
 
-{% block breadcrumbs %}
-    <div class="breadcrumbs">
-        <a href="{% url 'admin:index' %}">Главная</a> › 
-        <a href="{% url 'admin:app_list' app_label='grafik' %}">График</a> › 
-        {{ title }}
-    </div>
-{% endblock %}
-
 {% block content %}
-<div id="content-main">
-    <div id="calendar-container" data-has-permission="{{ has_permission|yesno:'true,false' }}">
-        <h1>{{ title }}</h1>
-        {% if has_permission %}
-            <div id='calendar'></div>
-        {% else %}
-            <p>У вас нет прав для просмотра этого раздела.</p>
-        {% endif %}
+    <div id="calendar-container" style="padding: 20px;">
+        <div id="calendar" data-events-url="{% url 'grafik:shift_events_api' %}"></div>
     </div>
-</div>
 {% endblock %}
 
 {% block extrajs %}
     {{ block.super }}
-    <!-- Локальное подключение JS FullCalendar -->
-    <script src='{% static "grafik/vendor/fullcalendar/index.global.min.js" %}'></script>
+    <script src="{% static 'grafik/vendor/fullcalendar/index.global.min.js' %}"></script>
     <script>
-        console.log('ExtraJS block started (local FullCalendar)'); 
-        
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOMContentLoaded event fired');
-            
-            var calendarContainer = document.getElementById('calendar-container');
-            if (!calendarContainer) {
-                console.error('Элемент calendar-container не найден!');
-                return;
-            }
-            console.log('calendarContainer найден:', calendarContainer);
+            console.log('FullCalendar initialization script started');
+            var calendarEl = document.getElementById('calendar');
+            if (calendarEl) {
+                var eventsUrl = calendarEl.dataset.eventsUrl;
+                console.log('Events URL for FullCalendar:', eventsUrl);
 
-            var hasPermission = calendarContainer.dataset.hasPermission === 'true'; 
-            console.log('hasPermission:', hasPermission);
+                var calendar = new FullCalendar.Calendar(calendarEl, {
+                    initialView: 'dayGridMonth',
+                    headerToolbar: {
+                        left: 'prev,next today',
+                        center: 'title',
+                        right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+                    },
+                    locale: 'ru',
+                    buttonText: {
+                        today: 'Сегодня',
+                        month: 'Месяц',
+                        week: 'Неделя',
+                        day: 'День',
+                        list: 'Список'
+                    },
+                    events: eventsUrl,
+                    loading: function(isLoading) {
+                        if (isLoading) {
+                            console.log('FullCalendar is loading events...');
+                        } else {
+                            console.log('FullCalendar has finished loading events.');
+                        }
+                    },
+                    eventDataTransform: function(eventData) {
+                        return eventData;
+                    },
+                    eventClick: function(info) {
+                        console.log('Event clicked:', info.event);
+                        let eventDetails = `Событие: ${info.event.extendedProps.employee_name || info.event.title}`;
+                        if (info.event.extendedProps.shift_time_str) {
+                            eventDetails += `\nВремя: ${info.event.extendedProps.shift_time_str}`;
+                        }
+                        eventDetails += `\nID: ${info.event.id}`;
+                        alert(eventDetails);
+                        
+                        if (info.event.id) {
+                           console.log(`Предполагаемый URL для редактирования: /admin/grafik/shift/${info.event.id}/change/`);
+                           // window.location.href = `/admin/grafik/shift/${info.event.id}/change/`;
+                        }
+                    },
+                    // --- ИЗМЕНЕННАЯ ФУНКЦИЯ eventContent ---
+                    eventContent: function(arg) {
+                        let employeeName = arg.event.extendedProps.employee_name || arg.event.title;
+                        let shiftTime = arg.event.extendedProps.shift_time_str;
 
-            if (hasPermission) {
-                var calendarEl = document.getElementById('calendar');
-                console.log('calendarEl:', calendarEl); 
-
-                if (calendarEl) {
-                    try { 
-                        var calendar = new FullCalendar.Calendar(calendarEl, {
-                            initialView: 'dayGridMonth',
-                            locale: 'ru',
-                            headerToolbar: {
-                                left: 'prev,next today',
-                                center: 'title',
-                                right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
-                            },
-                            buttonText: {
-                                today:    'Сегодня',
-                                month:    'Месяц',
-                                week:     'Неделя',
-                                day:      'День',
-                                list:     'Список'
-                            },
-                            editable: false,
-                            selectable: false,
-                        });
-                        console.log('FullCalendar объект создан:', calendar);
-                        calendar.render();
-                        console.log('calendar.render() вызван.');
-                    } catch (e) {
-                        console.error('Ошибка при инициализации или рендеринге FullCalendar:', e);
+                        // Используем НАШИ кастомные CSS-классы
+                        let innerHtml = `<div class="fc-event-main-custom-frame">`; // Наша общая обертка
+                        innerHtml +=    `<div class="fc-event-employee-name">${employeeName}</div>`; // Наш класс для имени
+                        if (shiftTime) {
+                            innerHtml += `<div class="fc-event-shift-time">${shiftTime}</div>`; // Наш класс для времени (БЕЗ ИНЛАЙН-СТИЛЕЙ)
+                        }
+                        innerHtml += `</div>`; // Закрываем fc-event-main-custom-frame
+                        
+                        return { html: innerHtml };
                     }
-                } else {
-                    console.warn('Элемент #calendar не найден на странице, хотя права есть.');
-                }
+                    // --- КОНЕЦ ИЗМЕНЕННОЙ ФУНКЦИИ eventContent ---
+                });
+                calendar.render();
+                console.log('FullCalendar rendered');
             } else {
-                console.info('Нет прав для отображения календаря (hasPermission is false).');
+                console.error('Calendar element #calendar not found!');
             }
         });
     </script>

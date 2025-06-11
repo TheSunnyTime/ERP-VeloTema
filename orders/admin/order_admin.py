@@ -1,20 +1,19 @@
 # F:\CRM 2.0\erp\orders\admin\order_admin.py
 from django.contrib import admin, messages
-from django.contrib.auth.models import User, Group 
+from django.contrib.auth.models import User, Group
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import F 
+from django.db.models import F, Q # <--- ДОБАВЛЕН ИМПОРТ Q
 from decimal import Decimal, ROUND_HALF_UP
 from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
-from django.utils import timezone 
+from django.utils import timezone
 from django.utils.html import format_html
 
-from uiconfig.models import OrderStatusColor, OrderDueDateColorRule 
-# --- ИЗМЕНЕННЫЙ ИМПОРТ ---
-from ..deadlines.services import determine_and_update_order_due_date, is_order_complex, REPAIR_ORDER_TYPE_NAME 
+from uiconfig.models import OrderStatusColor, OrderDueDateColorRule
+from ..deadlines.services import determine_and_update_order_due_date, is_order_complex, REPAIR_ORDER_TYPE_NAME
 
-from ..models import Order, OrderType # REPAIR_ORDER_TYPE_NAME теперь импортируется из deadlines.services
+from ..models import Order, OrderType
 from ..forms import OrderAdminForm
 from ..fifo_logic import calculate_and_assign_fifo_cost
 
@@ -32,7 +31,7 @@ class OrderAdmin(admin.ModelAdmin):
     form = OrderAdminForm
     list_display = (
         'id',
-        'colored_due_date', 
+        'colored_due_date',
         'display_client_with_phone',
         'display_manager_name',
         'display_performer_name',
@@ -43,14 +42,17 @@ class OrderAdmin(admin.ModelAdmin):
         'get_total_order_amount_display'
     )
     list_filter = (
-        'status', 'order_type', 'due_date','manager', 'performer', 
+        'status', 'order_type', 'due_date','manager', 'performer',
     )
     search_fields = (
         'id',
         'client__name',
         'client__phone',
         'manager__username', 'manager__first_name',
-        'performer__username', 'performer__first_name', 'notes', 'order_type__name'
+        'performer__username', 'performer__first_name',
+        'notes',
+        'order_type__name',
+        'repaired_item'
     )
     autocomplete_fields = ['manager', 'performer', 'client',]
     inlines = [OrderProductItemInline, OrderServiceItemInline]
@@ -62,8 +64,42 @@ class OrderAdmin(admin.ModelAdmin):
     def __init__(self, model, admin_site):
         super().__init__(model, admin_site)
 
+    # --- ОБНОВЛЕННЫЙ МЕТОД ДЛЯ РЕГИСТРОНЕЗАВИСИМОГО ПОИСКА ---
+    def get_search_results(self, request, queryset, search_term):
+        # Исходный queryset, который мы будем фильтровать
+        current_queryset = queryset
+        # По умолчанию use_distinct можно считать False; Django админка или мы сами можем его уточнить
+        use_distinct = False
+
+        if not search_term:
+            # Если нет поискового запроса, возвращаем исходный queryset и use_distinct=False
+            # (стандартное поведение ModelAdmin.get_search_results без search_term)
+            return current_queryset, False
+
+        # Если есть поисковый запрос, строим Q-объекты для __iregex
+        # Этот вариант будет искать всю фразу search_term в любом из полей (OR логика между полями)
+        search_queries = Q()
+        for field_name in self.search_fields:
+            # Для числового поля 'id' __iregex может работать не так, как ожидается,
+            # если search_term не является числом или частью числа.
+            # Но для простоты оставим __iregex для всех полей.
+            # Если search_term="12", то id=123 будет найден.
+            search_queries |= Q(**{f"{field_name}__iregex": search_term})
+        
+        current_queryset = current_queryset.filter(search_queries)
+        
+        # Определяем, нужен ли distinct:
+        # distinct обычно нужен, если в search_fields есть поля, которые приводят к JOIN'ам (содержат '__')
+        # Это помогает избежать дублирования результатов.
+        if any('__' in field for field in self.search_fields):
+            use_distinct = True
+            
+        return current_queryset, use_distinct
+    # --- КОНЕЦ ОБНОВЛЕННОГО МЕТОДА ---
+
     @property
     def status_colors_map(self):
+        # ... (без изменений) ...
         if self._status_colors_map_cache is None:
             try:
                 self._status_colors_map_cache = {
@@ -71,12 +107,13 @@ class OrderAdmin(admin.ModelAdmin):
                     for color_setting in OrderStatusColor.objects.all()
                 }
             except Exception as e:
-                print(f"Error loading OrderStatusColor: {e}") 
+                print(f"Error loading OrderStatusColor: {e}")
                 self._status_colors_map_cache = {}
         return self._status_colors_map_cache
 
     @property
     def due_date_color_rules(self):
+        # ... (без изменений) ...
         if self._due_date_color_rules_cache is None:
             try:
                 self._due_date_color_rules_cache = list(
@@ -86,19 +123,20 @@ class OrderAdmin(admin.ModelAdmin):
                 print(f"Error loading OrderDueDateColorRule: {e}")
                 self._due_date_color_rules_cache = []
         return self._due_date_color_rules_cache
-    
+
     def change_view(self, request, object_id, form_url='', extra_context=None):
+        # ... (без изменений) ...
         extra_context = extra_context or {}
         order = self.get_object(request, object_id)
         if order:
             try:
                 order_content_type = ContentType.objects.get_for_model(order)
                 available_templates = DocumentTemplate.objects.filter(
-                    document_type__related_model=order_content_type, 
+                    document_type__related_model=order_content_type,
                     is_active=True
                 )
                 extra_context['available_document_templates'] = available_templates
-                extra_context['current_object_id'] = object_id 
+                extra_context['current_object_id'] = object_id
                 extra_context['current_order_status_is_issued'] = (order.status == Order.STATUS_ISSUED)
             except ContentType.DoesNotExist:
                 extra_context['available_document_templates'] = None
@@ -106,10 +144,11 @@ class OrderAdmin(admin.ModelAdmin):
             except Exception as e:
                 extra_context['available_document_templates'] = None
                 messages.error(request, f"Ошибка при получении шаблонов документов: {str(e)}")
-        
+
         return super().change_view(request, object_id, form_url, extra_context=extra_context)
 
     def display_client_with_phone(self, obj):
+        # ... (без изменений) ...
         if obj.client:
             client_name = str(obj.client)
             phone_to_display = obj.client.phone
@@ -122,6 +161,7 @@ class OrderAdmin(admin.ModelAdmin):
     display_client_with_phone.admin_order_field = 'client'
 
     def display_manager_name(self, obj):
+        # ... (без изменений) ...
         if obj.manager:
             return obj.manager.first_name if obj.manager.first_name else obj.manager.username
         return "N/A"
@@ -129,6 +169,7 @@ class OrderAdmin(admin.ModelAdmin):
     display_manager_name.admin_order_field = 'manager__first_name'
 
     def display_performer_name(self, obj):
+        # ... (без изменений) ...
         if obj.performer:
             return obj.performer.first_name if obj.performer.first_name else obj.performer.username
         return "N/A"
@@ -136,19 +177,21 @@ class OrderAdmin(admin.ModelAdmin):
     display_performer_name.admin_order_field = 'performer__first_name'
 
     def get_total_order_amount_display(self, obj):
+        # ... (без изменений) ...
         if obj.pk: return obj.calculate_total_amount()
         return Decimal('0.00')
     get_total_order_amount_display.short_description = "Общая сумма заказа"
 
     def colored_status(self, obj):
+        # ... (без изменений) ...
         status_key = obj.status
         display_name = obj.get_status_display()
-        hex_color = self.status_colors_map.get(status_key, '#FFFFFF') 
+        hex_color = self.status_colors_map.get(status_key, '#FFFFFF')
         try:
             r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
             luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
             text_color = '#000000' if luminance > 0.5 else '#FFFFFF'
-        except: text_color = '#000000' 
+        except: text_color = '#000000'
         return format_html(
             '<span style="background-color: {}; color: {}; padding: 5px 10px; border-radius: 4px;">{}</span>',
             hex_color, text_color, display_name,
@@ -157,10 +200,11 @@ class OrderAdmin(admin.ModelAdmin):
     colored_status.admin_order_field = 'status'
 
     def get_due_date_style(self, due_date):
+        # ... (без изменений) ...
         if not due_date: return None
         today = timezone.now().date()
         days_remaining = (due_date - today).days
-        for rule in self.due_date_color_rules: 
+        for rule in self.due_date_color_rules:
             if rule.check_condition(days_remaining):
                 hex_bg_color = rule.hex_color
                 try:
@@ -172,10 +216,11 @@ class OrderAdmin(admin.ModelAdmin):
         return None
 
     def colored_due_date(self, obj):
+        # ... (без изменений) ...
         if obj.status == Order.STATUS_ISSUED:
-            return "–" 
+            return "–"
         if not obj.due_date: return "–" # Это также обработает тип "Определить", если due_date будет None
-        
+
         date_str = obj.due_date.strftime("%d.%m.%Y")
         style = self.get_due_date_style(obj.due_date)
         if style:
@@ -193,8 +238,8 @@ class OrderAdmin(admin.ModelAdmin):
         payment_closure_fieldset_fields = ['payment_method_on_closure']
         if request.user.is_superuser or request.user.has_perm('orders.can_view_target_cash_register'):
             payment_closure_fieldset_fields.append('target_cash_register')
-        date_info_fields_base = ['created_at', 'updated_at', 'due_date'] 
-        if obj: 
+        date_info_fields_base = ['created_at', 'updated_at', 'due_date']
+        if obj:
             current_main_fields = list(main_fields_tuple)
             fieldsets_config = (
                 (None, {'fields': tuple(current_main_fields)}),
@@ -202,7 +247,7 @@ class OrderAdmin(admin.ModelAdmin):
                 ('Суммы и даты (информация)', {'fields': ('get_total_order_amount_display',) + tuple(date_info_fields_base)})
             )
             return fieldsets_config
-        else: 
+        else:
             new_order_main_fields = list(main_fields_tuple)
             if 'manager' in new_order_main_fields: new_order_main_fields.remove('manager')
             payment_closure_fieldset_fields_new = ['payment_method_on_closure']
@@ -215,47 +260,39 @@ class OrderAdmin(admin.ModelAdmin):
 
 
     def get_readonly_fields(self, request, obj=None):
-        # Отладочный print, который ты добавил, оставляем, он полезен
+        # ... (без изменений) ...
         print(f"[GetReadonlyFields] Called. obj: {obj}, obj.pk: {obj.pk if obj else 'N/A'}, obj.status: {obj.status if obj and obj.pk else 'N/A'}")
 
         current_readonly_fields = ['created_at', 'updated_at', 'get_total_order_amount_display']
         current_readonly_fields.append('due_date')
 
-        # --- НАЧАЛО ИЗМЕНЕНИЙ ---
-        # Всегда работаем с объектом из БД, если он существует,
-        # чтобы избежать влияния несохраненных изменений из формы на логику readonly.
         db_obj = None
         if obj and obj.pk:
             try:
                 db_obj = self.model.objects.get(pk=obj.pk)
             except self.model.DoesNotExist:
-                # Это не должно происходить, если obj.pk существует, но на всякий случай
-                db_obj = obj # Возвращаемся к исходному obj, если не нашли в БД
-        # --- КОНЕЦ ИЗМЕНЕНИЙ ---
-
-        # Используем db_obj для всех проверок, если он был получен
+                db_obj = obj
         object_to_check = db_obj if db_obj else obj
 
-        if object_to_check and object_to_check.pk: 
-            can_edit_order_manager_group_name = "Редакторы ответственных в заказах" 
+        if object_to_check and object_to_check.pk:
+            can_edit_order_manager_group_name = "Редакторы ответственных в заказах"
             user_can_edit_manager = request.user.is_superuser or request.user.groups.filter(name=can_edit_order_manager_group_name).exists()
             if not user_can_edit_manager:
                 current_readonly_fields.append('manager')
-            
-            # Используем object_to_check.status (статус из БД или исходного obj)
-            if object_to_check.status == Order.STATUS_ISSUED: 
+
+            if object_to_check.status == Order.STATUS_ISSUED:
                 current_readonly_fields.extend(['status', 'payment_method_on_closure', 'client', 'manager', 'performer', 'order_type'])
-            else: 
+            else:
                 if not request.user.has_perm('orders.can_change_order_type_dynamically'):
                     current_readonly_fields.append('order_type')
-                
+
                 if object_to_check.order_type and object_to_check.order_type.name == OrderType.TYPE_SALE:
                     if 'due_date' in current_readonly_fields:
                         current_readonly_fields.remove('due_date')
-        else: 
+        else:
             current_readonly_fields.extend(['status', 'order_type', 'payment_method_on_closure', 'target_cash_register'])
-        
-        print(f"[GetReadonlyFields] Returning: {current_readonly_fields}") # Добавим этот print для отладки
+
+        print(f"[GetReadonlyFields] Returning: {current_readonly_fields}")
         return tuple(set(current_readonly_fields))
 
 
@@ -270,14 +307,14 @@ class OrderAdmin(admin.ModelAdmin):
         else:
             setattr(request, '_current_order_previous_status_from_db', Order.STATUS_NEW)
         form = super().get_form(request, obj, **kwargs)
-        if obj is None: 
+        if obj is None:
             new_status_choices = [choice for choice in Order.STATUS_CHOICES if choice[0] != Order.STATUS_ISSUED]
             if 'status' in form.base_fields:
                 form.base_fields['status'].choices = new_status_choices
                 form.base_fields['status'].initial = Order.STATUS_NEW
-            if 'manager' in form.base_fields: 
+            if 'manager' in form.base_fields:
                 form.base_fields['manager'].widget = admin.widgets.HiddenInput()
-                form.base_fields['manager'].required = False 
+                form.base_fields['manager'].required = False
         return form
 
     def _get_or_create_salary_calculation(self, request, order_instance, employee, role_context_key, role_verbose_name):
@@ -305,17 +342,18 @@ class OrderAdmin(admin.ModelAdmin):
                 previous_status_in_db_before_save = Order.objects.get(pk=obj.pk).status
             except Order.DoesNotExist:
                 previous_status_in_db_before_save = Order.STATUS_NEW if not change else None
-        else: 
-            previous_status_in_db_before_save = Order.STATUS_NEW 
+        else:
+            previous_status_in_db_before_save = Order.STATUS_NEW
         setattr(request, '_current_order_previous_status_from_db_for_save_related', previous_status_in_db_before_save)
-        if not change: 
-            if not obj.manager_id: 
+        if not change:
+            if not obj.manager_id:
                 obj.manager = request.user
         super().save_model(request, obj, form, change)
 
 
     def save_related(self, request, form, formsets, change):
-        order_instance = form.instance 
+        # ... (весь ваш существующий метод save_related остается без изменений) ...
+        order_instance = form.instance
         print(f"[OrderAdmin SaveRelated] НАЧАЛО для заказа ID: {order_instance.id}. Change: {change}")
 
         original_order_type_name_db = None
@@ -334,15 +372,15 @@ class OrderAdmin(admin.ModelAdmin):
             except Order.DoesNotExist:
                 print(f"[OrderAdmin SaveRelated] ОШИБКА: Заказ ID {order_instance.pk} не найден в БД.")
                 # Если не нашли в БД, берем значения из инстанса формы (хотя это не должно случиться для change=True)
-                original_due_date_db = order_instance.due_date 
+                original_due_date_db = order_instance.due_date
                 if order_instance.order_type: original_order_type_name_db = order_instance.order_type.name
         elif not change: # Новый заказ
             print(f"[OrderAdmin SaveRelated] Новый заказ. Исходные данные: Тип=None, Срок=None, Был комплексным=False")
             # original_order_type_name_db и original_due_date_db остаются None
             # was_complex_before_save_db остается False
-        
+
         # Сначала сохраняем инлайны, чтобы order_instance.service_items и product_items были актуальны
-        super().save_related(request, form, formsets, change) 
+        super().save_related(request, form, formsets, change)
         # Теперь order_instance (form.instance) содержит актуальные связанные объекты
 
         type_changed_by_determination = False
@@ -351,7 +389,7 @@ class OrderAdmin(admin.ModelAdmin):
             current_type_name_after_determination = order_instance.order_type.name if order_instance.order_type else None
             if current_type_name_after_determination != original_order_type_name_db:
                 type_changed_by_determination = True
-        
+
         print(f"[OrderAdmin SaveRelated] Заказ ID: {order_instance.id}. Тип ПОСЛЕ определения: {order_instance.order_type}. Тип изменился по сравнению с БД: {type_changed_by_determination}")
 
         # Рассчитываем/определяем новый due_date
@@ -361,13 +399,13 @@ class OrderAdmin(admin.ModelAdmin):
             order_instance, # Передаем инстанс с уже обновленными инлайнами и типом
             not change,     # is_new_order
             was_complex_before_save_db,
-            original_order_type_name_db 
+            original_order_type_name_db
         )
-        
+
         fields_to_update_at_end = []
         if type_changed_by_determination:
             fields_to_update_at_end.append('order_type')
-        
+
         # --- НАЧАЛО ИСПРАВЛЕНИЯ ---
         if new_due_date_calculated is not None: # Сервис вернул конкретную дату
             if new_due_date_calculated != original_due_date_db:
@@ -403,28 +441,25 @@ class OrderAdmin(admin.ModelAdmin):
         is_newly_issued_attempt = (
             order_instance.pk is not None and
             current_status_on_form == Order.STATUS_ISSUED and
-            (previous_db_status is None or previous_db_status != Order.STATUS_ISSUED) 
+            (previous_db_status is None or previous_db_status != Order.STATUS_ISSUED)
         )
         operations_successful_issue = False
 
         if is_newly_issued_attempt:
             # ... (весь ваш блок try/except/finally для is_newly_issued_attempt остается ЗДЕСЬ БЕЗ ИЗМЕНЕНИЙ) ...
-            # Важно: убедитесь, что order_instance.save() внутри этого блока включает 'order_type' и 'due_date',
-            # если они есть в fields_to_update_at_end, чтобы они сохранились при выдаче.
-            # Я добавил их в fields_to_save_on_issue.
             print(f"[OrderAdmin SaveRelated] Попытка выдачи заказа ID {order_instance.id}. Предыдущий статус в БД: {previous_db_status}, Текущий на форме: {current_status_on_form}")
             original_target_cash_register_id = order_instance.target_cash_register_id
             try:
                 #if not order_instance.payment_method_on_closure: raise ValidationError("Метод оплаты должен быть указан.")
                 #if order_instance.order_type and order_instance.order_type.name == REPAIR_ORDER_TYPE_NAME and not order_instance.performer: raise ValidationError(f"Исполнитель должен быть указан для '{REPAIR_ORDER_TYPE_NAME}'.")
-                
+
                 determined_cash_register_qs = CashRegister.objects.none()
                 if order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CASH: determined_cash_register_qs = CashRegister.objects.filter(is_default_for_cash=True, is_active=True)
                 elif order_instance.payment_method_on_closure == Order.ORDER_PAYMENT_METHOD_CARD: determined_cash_register_qs = CashRegister.objects.filter(is_default_for_card=True, is_active=True)
                 if not determined_cash_register_qs.exists(): raise ValidationError("Касса по умолчанию для выбранного метода оплаты не найдена.")
                 if determined_cash_register_qs.count() > 1: raise ValidationError("Найдено несколько касс по умолчанию для выбранного метода оплаты.")
                 determined_cash_register = determined_cash_register_qs.first()
-                
+
                 current_order_total = order_instance.calculate_total_amount()
                 if not (current_order_total > Decimal('0.00')): raise ValidationError(f"Сумма заказа ({current_order_total}) должна быть > 0 для выдачи.")
 
@@ -432,7 +467,7 @@ class OrderAdmin(admin.ModelAdmin):
                     for item in order_instance.product_items.all():
                         calculate_and_assign_fifo_cost(item)
                         item.save(update_fields=['cost_price_at_sale'])
-                    
+
                     for item in order_instance.product_items.all():
                         product_to_update = Product.objects.select_for_update().get(pk=item.product.pk)
                         if product_to_update.stock_quantity < item.quantity:
@@ -440,11 +475,11 @@ class OrderAdmin(admin.ModelAdmin):
                         product_to_update.stock_quantity -= item.quantity
                         product_to_update.updated_at = timezone.now()
                         product_to_update.save(update_fields=['stock_quantity', 'updated_at'])
-                    
+
                     order_instance.target_cash_register = determined_cash_register
                     order_instance.updated_at = timezone.now()
-                    
-                    fields_to_save_on_issue = ['target_cash_register', 'updated_at', 'status'] 
+
+                    fields_to_save_on_issue = ['target_cash_register', 'updated_at', 'status']
                     if 'order_type' in fields_to_update_at_end: fields_to_save_on_issue.append('order_type')
                     if 'due_date' in fields_to_update_at_end: fields_to_save_on_issue.append('due_date')
                     order_instance.save(update_fields=list(set(fields_to_save_on_issue))) # order_instance уже содержит обновленные order_type/due_date
@@ -452,15 +487,15 @@ class OrderAdmin(admin.ModelAdmin):
 
                     if not CashTransaction.objects.filter(order=order_instance, transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME).exists():
                         CashTransaction.objects.create(
-                            cash_register=order_instance.target_cash_register, 
-                            transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME, 
-                            payment_method=order_instance.payment_method_on_closure, 
-                            amount=current_order_total, 
-                            employee=order_instance.manager, 
-                            order=order_instance, 
+                            cash_register=order_instance.target_cash_register,
+                            transaction_type=CashTransaction.TRANSACTION_TYPE_INCOME,
+                            payment_method=order_instance.payment_method_on_closure,
+                            amount=current_order_total,
+                            employee=order_instance.manager,
+                            order=order_instance,
                             description=f"Оплата по заказу №{order_instance.id} (статус Выдан)"
                         )
-                    
+
                     # --- БЛОК РАСЧЕТА ЗАРПЛАТЫ (без изменений) ---
                     earners_to_process = []
                     if order_instance.manager: earners_to_process.append({'employee_obj': order_instance.manager, 'role_key_for_rate': EmployeeRate.ROLE_MANAGER, 'role_verbose': 'Менеджер', 'salary_calc_role_context': SalaryCalculation.ROLE_CONTEXT_MANAGER})
@@ -506,16 +541,16 @@ class OrderAdmin(admin.ModelAdmin):
                 messages.error(request, f"Не удалось завершить выдачу заказа №{order_instance.id}: {str(e)}")
             finally:
                 if not operations_successful_issue and previous_db_status is not None:
-                    if previous_db_status != Order.STATUS_ISSUED: 
+                    if previous_db_status != Order.STATUS_ISSUED:
                         Order.objects.filter(pk=order_instance.pk).update(
-                            status=previous_db_status, 
-                            updated_at=timezone.now(), 
+                            status=previous_db_status,
+                            updated_at=timezone.now(),
                             target_cash_register_id=original_target_cash_register_id
                         )
-                        form.instance.status = previous_db_status 
+                        form.instance.status = previous_db_status
                         form.instance.target_cash_register_id = original_target_cash_register_id
                         messages.info(request, f"Статус заказа №{order_instance.id} возвращен на '{order_instance.get_status_display_for_key(previous_db_status)}'. Операции по выдаче отменены.")
-        
+
         # Сохраняем измененный тип и/или срок, ЕСЛИ заказ НЕ выдавался успешно
         if not (is_newly_issued_attempt and operations_successful_issue):
             if fields_to_update_at_end: # Если есть что обновлять (тип или срок)
@@ -523,25 +558,26 @@ class OrderAdmin(admin.ModelAdmin):
                 if 'updated_at' not in fields_to_update_at_end:
                     fields_to_update_at_end.append('updated_at')
                 order_instance.updated_at = timezone.now()
-                
+
                 # order_instance уже содержит обновленные значения order_type и due_date
                 order_instance.save(update_fields=list(set(fields_to_update_at_end)))
-                
+
                 if 'order_type' in fields_to_update_at_end:
                     messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
                 if 'due_date' in fields_to_update_at_end:
                     due_date_display = order_instance.due_date.strftime('%d.%m.%Y') if order_instance.due_date else "не установлен"
                     messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {due_date_display}.")
-        
+
         print(f"[OrderAdmin SaveRelated] КОНЕЦ для заказа ID: {order_instance.id}")
+
 
     class Media:
         js = (
-            'admin/js/jquery.init.js', 
+            'admin/js/jquery.init.js',
             'orders/js/order_form_price_updater.js',
             'orders/js/order_fifo_updater.js',
             'orders/js/order_form_conditional_fields.js',
-            'orders/js/adaptive_client_field.js', 
+            'orders/js/adaptive_client_field.js',
         )
         css = {
             'all': ('orders/css/admin_order_form.css',)

@@ -5,7 +5,7 @@
     <div class="app-{{ app.app_label }} module{% if app.app_url in request.path|urlencode %} current-app{% endif %}">
       <table>
         <caption>
-          {# ИЗМЕНЕНИЕ ЗДЕСЬ: Убираем ссылку <a> и используем verbose_name #}
+          {# Ваше изменение: Убираем ссылку <a> и используем verbose_name #}
           {{ app.verbose_name|default:app.name }}
         </caption>
         <thead class="visually-hidden">
@@ -29,7 +29,7 @@
               {% if model.add_url %}
                 <td><a href="{{ model.add_url }}" class="addlink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'Add' %}</a></td>
               {% else %}
-                <td></td>
+                <td></td> {# Оставляем пустую ячейку, если нет add_url #}
               {% endif %}
 
               {% if model.admin_url and show_changelinks %}
@@ -39,11 +39,33 @@
                   <td><a href="{{ model.admin_url }}" class="changelink" aria-describedby="{{ app.app_label }}-{{ model_name }}">{% translate 'Change' %}</a></td>
                 {% endif %}
               {% elif show_changelinks %}
-                <td></td>
+                <td></td> {# Оставляем пустую ячейку, если нет admin_url, но show_changelinks истинно #}
               {% endif %}
             </tr>
           {% endwith %}
         {% endfor %}
+
+        {# --- НАЧАЛО НАШЕЙ ВСТАВКИ ДЛЯ ПРИЛОЖЕНИЯ 'grafik' --- #}
+        {% if app.app_label == 'grafik' %}
+            <tr class="model-calendar"> {# Используем класс, похожий на модельный, для стилизации #}
+                {# Ссылка на кастомное представление календаря. Имя 'admin:calendar' мы определили ранее. #}
+                <th scope="row" id="{{ app.app_label }}-calendar"> {# Добавляем ID для aria-describedby, если нужно #}
+                    <a href="{% url 'admin:calendar' %}">{% translate 'Календарь смен' %}</a>
+                </th>
+                
+                {# Пустая ячейка, так как для календаря нет стандартной кнопки "Добавить" #}
+                <td></td>
+                
+                {# Ссылка "Просмотр", если show_changelinks активно #}
+                {% if show_changelinks %}
+                    <td><a href="{% url 'admin:calendar' %}" class="viewlink" aria-describedby="{{ app.app_label }}-calendar">{% translate 'View' %}</a></td>
+                {% else %}
+                    <td></td>
+                {% endif %}
+            </tr>
+        {% endif %}
+        {# --- КОНЕЦ НАШЕЙ ВСТАВКИ --- #}
+
       </table>
     </div>
   {% endfor %}
