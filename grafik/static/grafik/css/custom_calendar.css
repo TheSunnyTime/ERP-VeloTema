@@ -1,34 +1,130 @@
-/* grafik/static/grafik/css/custom_calendar.css */
-
+/* --- Базовый стиль блока события --- */
 .fc-event-main-custom-frame { 
     padding: 3px 5px;
     line-height: 1.3;
 }
 
-/* --- Стили для ДНЕВНОГО РЕЖИМА (по умолчанию) --- */
-/* Мы можем добавить :not(.theme-dark) к body, чтобы эти правила точно не применялись в темной теме,
-   но обычно достаточно того, что правила для .theme-dark идут позже или более специфичны.
-   Пока оставим как есть. */
+/* --- Стили для дневного режима (по умолчанию) --- */
 .fc-event-employee-name {
     font-weight: bold;
     font-size: 1.1em; 
     white-space: normal; 
     display: block; 
-    color: #1A237E;   /* Глубокий темно-синий */
+    color: #1A237E;
 }
 
 .fc-event-shift-time {
     font-size: 1em; 
     display: block; 
-    color: #4A4A4A;   /* Темно-серый */
+    color: #4A4A4A;
 }
 
-/* --- Стили для ТЕМНОГО РЕЖИМА --- */
-/* Увеличиваем специфичность, добавляя #calendar или другой родительский элемент, если нужно */
-body.theme-dark #calendar .fc-event-employee-name { /* Добавили #calendar */
-    color: #E3F2FD !important;   /* Очень светло-голубой, добавили !important для теста */
+/* --- Цвета и стили для темной темы --- */
+body.theme-dark {
+    background: #181818;
+    color: #e0e0e0;
 }
 
-body.theme-dark #calendar .fc-event-shift-time { /* Добавили #calendar */
-    color: #B0BEC5 !important;   /* Светлый серо-голубой, добавили !important для теста */
+body.theme-dark #calendar,
+body.theme-dark .fc {
+    background: #181818;
+    color: #e0e0e0;
+}
+
+body.theme-dark .fc-toolbar-title {
+    color: #fff;
+}
+
+body.theme-dark .fc-button,
+body.theme-dark .fc-button-primary {
+    background: #263238;
+    color: #e3f2fd;
+    border: 1px solid #90caf9;
+}
+
+body.theme-dark .fc-button-active,
+body.theme-dark .fc-button-primary:active,
+body.theme-dark .fc-button-primary:focus {
+    background: #1565c0;
+    color: #fff;
+}
+
+body.theme-dark .fc-daygrid-day,
+body.theme-dark .fc-daygrid-day-frame {
+    background: #222;
+    border-color: #444;
+}
+
+body.theme-dark .fc-day-today {
+    background: #333 !important;
+}
+
+body.theme-dark .fc-daygrid-day-number {
+    color: #b0bec5;
+}
+
+body.theme-dark .fc-event,
+body.theme-dark .fc-event .fc-event-title,
+body.theme-dark .fc-event .fc-event-time,
+body.theme-dark .fc-list-event {
+    color: #e3f2fd !important;
+    background: #263238 !important;
+    border-color: #90caf9 !important;
+}
+
+body.theme-dark .fc-event:hover {
+    background: #1565c0 !important;
+    color: #fff !important;
+}
+
+body.theme-dark .fc-popover {
+    background: #263238;
+    color: #e3f2fd;
+    border-color: #90caf9;
+}
+
+body.theme-dark .fc-list-event {
+    background: #222;
+    color: #e3f2fd;
+    border-color: #444;
+}
+
+body.theme-dark .fc-list-event:hover {
+    background: #1565c0;
+    color: #fff;
+}
+
+body.theme-dark .fc-scrollgrid {
+    border-color: #444;
+}
+
+body.theme-dark .fc-col-header-cell {
+    background: #181818;
+    color: #b0bec5;
+    border-color: #444;
+}
+
+body.theme-dark .fc-day-disabled {
+    background: #181818;
+    color: #555;
+}
+
+body.theme-dark .fc-highlight {
+    background: #37474f !important;
+}
+
+body.theme-dark .fc-day-other {
+    background: #181818;
+    color: #555;
+}
+
+/* --- КРИТИЧЕСКИЙ ОВЕРРАЙД для темной темы (максимальная специфичность и !important) --- */
+body.theme-dark .fc-daygrid-event-harness .fc-event-employee-name,
+body.theme-dark .fc-daygrid-event-harness .fc-event-shift-time,
+body.theme-dark .fc-event-main-custom-frame .fc-event-employee-name,
+body.theme-dark .fc-event-main-custom-frame .fc-event-shift-time,
+body.theme-dark .fc-event-employee-name[style],
+body.theme-dark .fc-event-shift-time[style] {
+    color: #e3f2fd !important;
+    text-shadow: 0 1px 2px #000 !important;
 }

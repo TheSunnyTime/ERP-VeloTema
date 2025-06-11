@@ -3,6 +3,11 @@
 
 {% block title %}Календарь смен{% endblock %}
 
+{# --- ОБЯЗАТЕЛЬНО: Подключаем стандартные скрипты и стили Django admin, включая theme.js --- #}
+{% block extrahead %}
+    {{ block.super }}
+{% endblock %}
+
 {% block extrastyle %}
     {{ block.super }}
     {# <link rel="stylesheet" href="{% static 'grafik/vendor/fullcalendar/index.global.min.css' %}"> #}
@@ -27,9 +32,21 @@
 
 {% block extrajs %}
     {{ block.super }}
+    
     <script src="{% static 'grafik/vendor/fullcalendar/index.global.min.js' %}"></script>
+    <script src="{% static 'grafik/vendor/fullcalendar/calendar_init.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // --- ВРЕМЕННЫЙ ФИКС: Применяем theme-dark вручную, если тема выбрана как dark или auto+prefers-dark ---
+            // Это не будет мешать стандартному theme.js, но поможет при кастомных view.
+            var theme = localStorage.getItem('django.colorTheme') || 'auto';
+            var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (theme === 'dark' || (theme === 'auto' && prefersDark)) {
+                document.body.classList.add('theme-dark');
+            } else {
+                document.body.classList.remove('theme-dark');
+            }
+
             console.log('FullCalendar initialization script started');
             var calendarEl = document.getElementById('calendar');
             if (calendarEl) {

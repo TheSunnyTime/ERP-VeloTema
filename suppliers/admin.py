@@ -2,6 +2,7 @@ from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.utils import timezone # Для работы с timezone.now()
 from datetime import timedelta # Для правила 24 часов
+from decimal import Decimal # Убедимся, что Decimal импортирован
 
 # Импортируем модели и кастомное исключение
 from .models import Supplier, Supply, SupplyItem, CannotCancelError 
@@ -38,21 +39,35 @@ class SupplierAdmin(admin.ModelAdmin):
 
 
 class SupplyItemInline(admin.TabularInline):
-    # ... (код SupplyItemInline остается таким же) ...
     model = SupplyItem
     extra = 1
     autocomplete_fields = ['product']
-    fields = ('product', 'quantity_received', 'cost_price_per_unit', 'quantity_remaining_in_batch')
-    base_readonly_fields = ('quantity_remaining_in_batch',) 
+    # ИЗМЕНЕНО: Добавлено 'line_total' в fields
+    fields = ('product', 'quantity_received', 'cost_price_per_unit', 'line_total', 'quantity_remaining_in_batch')
+    # ИЗМЕНЕНО: Добавлено 'line_total' к base_readonly_fields
+    base_readonly_fields = ('quantity_remaining_in_batch', 'line_total')
+
+    def line_total(self, obj):
+        """Рассчитывает сумму по строке: количество * себестоимость."""
+        if obj.pk and obj.quantity_received is not None and obj.cost_price_per_unit is not None:
+            return (obj.quantity_received * obj.cost_price_per_unit).quantize(Decimal('0.01'))
+        return Decimal('0.00')
+    line_total.short_description = "Сумма по строке"
 
     def get_readonly_fields(self, request, obj=None):
+        # Используем копию base_readonly_fields, чтобы не изменять исходный кортеж класса
+        current_readonly = list(self.base_readonly_fields)
         if hasattr(self, 'readonly_fields_set_by_parent'):
-            return self.readonly_fields_set_by_parent
-        return self.base_readonly_fields
+            # Если родительский админ устанавливает readonly поля,
+            # добавляем к ним наши базовые readonly поля (включая line_total),
+            # чтобы они не стали редактируемыми.
+            # Используем set для избежания дубликатов.
+            return tuple(set(list(self.readonly_fields_set_by_parent) + current_readonly))
+        return tuple(current_readonly)
+
 
 @admin.register(Supply)
 class SupplyAdmin(admin.ModelAdmin):
-    # ... (__init__, colored_status, list_display, list_filter, search_fields, autocomplete_fields, inlines, ordering, fieldsets, base_readonly_fields_tuple ... все это остается как в предыдущей версии)
     def __init__(self, model, admin_site):
         super().__init__(model, admin_site)
         try:
@@ -60,7 +75,7 @@ class SupplyAdmin(admin.ModelAdmin):
                 color.status_key: color.hex_color
                 for color in SupplyStatusColor.objects.all()
             }
-        except Exception as e:
+        except Exception as e: # noqa
             self.supply_status_colors_map = {}
 
     def colored_status(self, obj):
@@ -77,13 +92,13 @@ class SupplyAdmin(admin.ModelAdmin):
     colored_status.admin_order_field = 'status'
 
     list_display = (
-        'id', 'supplier', 
-        'expected_delivery_date', 
-        'receipt_date', 
-        'colored_status', 
-        'received_at', 
-        'created_by', 
-        'payment_transaction_created', 
+        'id', 'supplier',
+        'expected_delivery_date',
+        'receipt_date',
+        'colored_status',
+        'received_at',
+        'created_by',
+        'payment_transaction_created',
         'created_at'
     )
     list_filter = ('status', 'supplier', 'receipt_date', 'expected_delivery_date', 'created_by', 'payment_transaction_created')
@@ -91,10 +106,11 @@ class SupplyAdmin(admin.ModelAdmin):
     autocomplete_fields = ['supplier', 'created_by']
     inlines = [SupplyItemInline]
     ordering = ('-receipt_date', '-id')
-    
+
+    # ИЗМЕНЕНО: Добавлено 'display_total_supply_cost' в fieldsets
     fieldsets = (
         (None, {
-            'fields': ('supplier', 'expected_delivery_date', 'receipt_date', 'document_number', 'status')
+            'fields': ('supplier', 'expected_delivery_date', 'receipt_date', 'document_number', 'status', 'display_total_supply_cost')
         }),
         ('Информация об оприходовании и оплате', {
             'fields': ('received_at', 'payment_transaction_created',),
@@ -102,12 +118,20 @@ class SupplyAdmin(admin.ModelAdmin):
         }),
         ('Дополнительно', {'fields': ('notes',)}),
         ('Информация о записи', {
-            'fields': ('created_by', ('created_at', 'updated_at')), 
+            'fields': ('created_by', ('created_at', 'updated_at')),
             'classes': ('collapse',)
         }),
     )
-    
-    base_readonly_fields_tuple = ('created_at', 'updated_at', 'created_by', 'payment_transaction_created', 'received_at')
+
+    # ИЗМЕНЕНО: Добавлено 'display_total_supply_cost' к base_readonly_fields_tuple
+    base_readonly_fields_tuple = ('created_at', 'updated_at', 'created_by', 'payment_transaction_created', 'received_at', 'display_total_supply_cost')
+
+    def display_total_supply_cost(self, obj):
+        """Отображает итоговую стоимость поставки."""
+        if obj and obj.pk: # Убедимся, что объект существует (уже сохранен)
+            return obj.get_total_cost().quantize(Decimal('0.01'))
+        return Decimal('0.00') # Для новых, еще не сохраненных поставок
+    display_total_supply_cost.short_description = "Итоговая сумма поставки"
 
 
     def get_readonly_fields(self, request, obj=None):
