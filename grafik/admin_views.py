@@ -3,17 +3,21 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
 from django.template.loader import render_to_string
 from django.contrib import admin
+from django.contrib.auth.decorators import permission_required
 # from django.urls import reverse # Если не используется для отладки URL, можно убрать
 
 @staff_member_required
+@permission_required('grafik.view_shift', raise_exception=True)
 def calendar_view(request):
+    # Проверяем, есть ли у пользователя право просматривать смены (для вывода в шаблон)
     has_permission_to_view = request.user.has_perm('grafik.view_shift')
     context = {
         **admin.site.each_context(request),
-        'title': 'Календарь смен', # Можно вернуть исходный заголовок или оставить тестовый
+        'title': 'Календарь смен',
         'app_label': 'grafik',
         'has_permission': has_permission_to_view,
     }
+    
 
     # --- ДИАГНОСТИЧЕСКИЙ ВЫВОД ---
     try:

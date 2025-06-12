@@ -1,13 +1,76 @@
-# grafik/admin.py
 from django.contrib import admin
 from django.urls import path
-from .models import Shift, ColorRule, ColorAssignment
+from .models import Shift, ColorRule, ColorAssignment, ScheduleTemplate
 from .admin_views import calendar_view
 from django.contrib.auth.models import User
+from django.contrib import messages
+from datetime import timedelta, date
 
+# --- ДОБАВЛЯЕМ ScheduleTemplate в админку ---
+@admin.register(ScheduleTemplate)
+class ScheduleTemplateAdmin(admin.ModelAdmin):
+    list_display = ('employee', 'work_days', 'start_time', 'end_time')
+    search_fields = ('employee__username', 'employee__first_name', 'employee__last_name')
+    verbose_name = "Шаблон расписания"
+    verbose_name_plural = "Шаблоны расписаний"
+
+# --- ЭКШН для массового создания смен по шаблону для сотрудников ---
+def apply_schedule_template(modeladmin, request, queryset):
+    from datetime import date, timedelta
+
+    for employee in queryset:
+        try:
+            template = ScheduleTemplate.objects.get(employee=employee)
+        except ScheduleTemplate.DoesNotExist:
+            messages.warning(request, f"Нет шаблона у {employee}")
+            continue
+
+        today = date.today()
+        first_day = today.replace(day=1)
+        next_month = (first_day + timedelta(days=32)).replace(day=1)
+        last_day = next_month - timedelta(days=1)
+
+        # 1. Удаляем все смены сотрудника за этот месяц
+        deleted_count, _ = Shift.objects.filter(
+            employee=employee,
+            date__gte=first_day,
+            date__lte=last_day
+        ).delete()
+
+        # 2. Создаем смены по шаблону
+        current_day = first_day
+        work_days = template.get_work_days_list()
+        created_count = 0
+
+        while current_day <= last_day:
+            if current_day.weekday() in work_days:
+                Shift.objects.create(
+                    employee=employee,
+                    date=current_day,
+                    start_time=template.start_time,
+                    end_time=template.end_time,
+                )
+                created_count += 1
+            current_day += timedelta(days=1)
+        messages.success(
+            request,
+            f"Для {employee} удалено смен: {deleted_count}, создано новых: {created_count}"
+        )
+
+apply_schedule_template.short_description = "Перезаписать смены на месяц по шаблону"
+
+# --- Регистрируем экшн в админке пользователей ---
+class CustomUserAdmin(admin.ModelAdmin):
+    list_display = ('username', 'first_name', 'last_name', 'is_active')
+    search_fields = ('username', 'first_name', 'last_name')
+    actions = [apply_schedule_template]
+
+admin.site.unregister(User)
+admin.site.register(User, CustomUserAdmin)
+
+# --- Твоя оригинальная ShiftAdmin ---
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
-    # ... (весь твой существующий код для ShiftAdmin до get_urls) ...
     list_display = ('employee_name', 'date', 'start_time', 'end_time', 'duration_display', 'notes_preview', 'updated_at')
     list_filter = ('date', 'employee')
     search_fields = ('employee__username', 'employee__first_name', 'employee__last_name', 'notes')
@@ -53,14 +116,12 @@ class ShiftAdmin(admin.ModelAdmin):
 
     def get_urls(self):
         urls = super().get_urls()
-        # Имя для URL календаря будет 'admin:grafik_shift_calendar'
-        # Имя для URL API будет 'admin:grafik_shift_api_events'
         custom_urls = [
-            path('calendar/', self.admin_site.admin_view(calendar_view), name='calendar'), # Django админка добавит префикс app_label_modelname
+            path('calendar/', self.admin_site.admin_view(calendar_view), name='calendar'),
         ]
         return custom_urls + urls
 
-# ... (ColorRuleAdmin и ColorAssignmentAdmin остаются без изменений) ...
+# --- ColorRuleAdmin и ColorAssignmentAdmin без изменений ---
 @admin.register(ColorRule)
 class ColorRuleAdmin(admin.ModelAdmin):
     list_display = ('name', 'hex_color', 'colored_preview', 'description_preview')
