@@ -1,4 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
+    // Получаем список пустых дат и нужный цвет из Django (эти переменные должны быть определены в шаблоне выше!)
+    var emptyDays = typeof emptyDays !== "undefined" ? emptyDays : [];
+    var emptyHex = typeof emptyHex !== "undefined" ? emptyHex : "#FFCCCC";
+
     var calendarEl = document.getElementById('calendar');
     if (!calendarEl) return;
     var eventsUrl = calendarEl.dataset.eventsUrl;
@@ -19,6 +23,15 @@ document.addEventListener('DOMContentLoaded', function() {
             list: 'Список'
         },
         events: eventsUrl,
+        // --- Подсветка дней без смен ---
+        dayCellDidMount: function(info) {
+            // Преобразуем дату ячейки в формат YYYY-MM-DD
+            var d = info.date.toISOString().slice(0, 10);
+            if (emptyDays.includes(d)) {
+                info.el.style.backgroundColor = emptyHex;
+            }
+        },
+        // --- ТВОЙ КОД для кастомного отображения событий ---
         eventContent: function(arg) {
             let employeeName = arg.event.extendedProps.employee_name || arg.event.title;
             let shiftTime = arg.event.extendedProps.shift_time_str;
@@ -34,6 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     calendar.render();
 
+    // --- ТВОЯ функция для исправления цветов (если нужна) ---
     function fixEventColors() {
         if (document.body.classList.contains('theme-dark')) {
             document.querySelectorAll('.fc-event-employee-name, .fc-event-shift-time').forEach(el => {
@@ -43,16 +57,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // MutationObserver — следит за изменениями внутри календаря и перебивает цвет
     var observer = new MutationObserver(fixEventColors);
     observer.observe(calendarEl, { childList: true, subtree: true });
 
-    // Срабатывает после отрисовки каждого события и смены дат
     calendar.on('eventDidMount', fixEventColors);
     calendar.on('datesSet', fixEventColors);
 
-    // Срабатывает сразу после первого рендера
     fixEventColors();
-
-    // Если тема меняется динамически — вызвать fixEventColors() вручную после смены темы!
 });

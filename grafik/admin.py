@@ -1,12 +1,14 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, reverse
+from django.utils.html import format_html
 from .models import Shift, ColorRule, ColorAssignment, ScheduleTemplate
 from .admin_views import calendar_view
 from django.contrib.auth.models import User
 from django.contrib import messages
 from datetime import timedelta, date
 
-# --- ДОБАВЛЯЕМ ScheduleTemplate в админку ---
+# --- ScheduleTemplateAdmin и экшены без изменений ---
+
 @admin.register(ScheduleTemplate)
 class ScheduleTemplateAdmin(admin.ModelAdmin):
     list_display = ('employee', 'work_days', 'start_time', 'end_time')
@@ -14,7 +16,6 @@ class ScheduleTemplateAdmin(admin.ModelAdmin):
     verbose_name = "Шаблон расписания"
     verbose_name_plural = "Шаблоны расписаний"
 
-# --- ЭКШН для массового создания смен по шаблону для сотрудников ---
 def apply_schedule_template(modeladmin, request, queryset):
     from datetime import date, timedelta
 
@@ -30,14 +31,12 @@ def apply_schedule_template(modeladmin, request, queryset):
         next_month = (first_day + timedelta(days=32)).replace(day=1)
         last_day = next_month - timedelta(days=1)
 
-        # 1. Удаляем все смены сотрудника за этот месяц
         deleted_count, _ = Shift.objects.filter(
             employee=employee,
             date__gte=first_day,
             date__lte=last_day
         ).delete()
 
-        # 2. Создаем смены по шаблону
         current_day = first_day
         work_days = template.get_work_days_list()
         created_count = 0
@@ -59,7 +58,6 @@ def apply_schedule_template(modeladmin, request, queryset):
 
 apply_schedule_template.short_description = "Перезаписать смены на месяц по шаблону"
 
-# --- Регистрируем экшн в админке пользователей ---
 class CustomUserAdmin(admin.ModelAdmin):
     list_display = ('username', 'first_name', 'last_name', 'is_active')
     search_fields = ('username', 'first_name', 'last_name')
@@ -68,7 +66,7 @@ class CustomUserAdmin(admin.ModelAdmin):
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
-# --- Твоя оригинальная ShiftAdmin ---
+# --- ShiftAdmin с ссылкой на календарь в changelist ---
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
     list_display = ('employee_name', 'date', 'start_time', 'end_time', 'duration_display', 'notes_preview', 'updated_at')
@@ -121,6 +119,14 @@ class ShiftAdmin(admin.ModelAdmin):
         ]
         return custom_urls + urls
 
+    # Добавляем ссылку на календарь смен на страницу списка смен (вверху)
+    def changelist_view(self, request, extra_context=None):
+        calendar_url = reverse('admin:calendar')
+        if extra_context is None:
+            extra_context = {}
+        extra_context['calendar_link'] = calendar_url
+        return super().changelist_view(request, extra_context=extra_context)
+
 # --- ColorRuleAdmin и ColorAssignmentAdmin без изменений ---
 @admin.register(ColorRule)
 class ColorRuleAdmin(admin.ModelAdmin):
@@ -137,7 +143,6 @@ class ColorRuleAdmin(admin.ModelAdmin):
                     rgb = tuple(int(hex_val[i:i+len(hex_val)//3], 16) for i in range(0, len(hex_val), len(hex_val)//3))
                     if len(hex_val) == 3:
                         rgb = tuple(c*17 for c in rgb)
-
                     brightness = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000
                     text_color = '#000000' if brightness > 125 else '#FFFFFF'
                 except ValueError:

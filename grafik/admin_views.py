@@ -1,58 +1,36 @@
-# grafik/admin_views.py
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
-from django.template.loader import render_to_string
-from django.contrib import admin
 from django.contrib.auth.decorators import permission_required
-# from django.urls import reverse # Если не используется для отладки URL, можно убрать
+from datetime import date
+from calendar import monthrange
+from .models import Shift
 
 @staff_member_required
 @permission_required('grafik.view_shift', raise_exception=True)
 def calendar_view(request):
-    # Проверяем, есть ли у пользователя право просматривать смены (для вывода в шаблон)
     has_permission_to_view = request.user.has_perm('grafik.view_shift')
+
+    today = date.today()
+    year = today.year
+    month = today.month
+
+    num_days = monthrange(year, month)[1]
+    all_days = [date(year, month, day).strftime('%Y-%m-%d') for day in range(1, num_days + 1)]
+
+    shifts = Shift.objects.filter(date__year=year, date__month=month)
+    days_with_shifts = set()
+    for s in shifts:
+        days_with_shifts.add(s.date.strftime('%Y-%m-%d'))
+
+    empty_days = [d for d in all_days if d not in days_with_shifts]
+
     context = {
-        **admin.site.each_context(request),
         'title': 'Календарь смен',
         'app_label': 'grafik',
         'has_permission': has_permission_to_view,
+        'empty_days': empty_days,
+        'empty_hex': '#FFCCCC',
+        'days_with_shifts': list(days_with_shifts),  # добавь для вывода отладки!
     }
-    
-
-    # --- ДИАГНОСТИЧЕСКИЙ ВЫВОД ---
-    try:
-        rendered_html_output = render_to_string('admin/grafik/calendar_view.html', context, request=request)
-        print("\n" + "="*60)
-        print("НАЧАЛО ОТЛАДКИ РЕНДЕРИНГА БЛОКА EXTRAJS (admin_views.py)")
-        print("="*60)
-        
-        # Обновленный маркер, который должен присутствовать в вашем extrajs
-        target_js_marker = "FullCalendar initialization script started" 
-        
-        if target_js_marker in rendered_html_output:
-            print(f"+++ УСПЕХ (диагностика): Маркер '{target_js_marker}' НАЙДЕН в отрендеренном HTML.")
-        else:
-            # Если маркер все еще не найден, это может указывать на другие проблемы или на то,
-            # что скрипт FullCalendar не попадает в extrajs по какой-то причине,
-            # которую мы еще не выявили.
-            print(f"--- ОШИБКА (диагностика): Маркер '{target_js_marker}' НЕ НАЙДЕН в отрендеренном HTML.")
-            print("\n--- Сниппет конца отрендеренного HTML (последние 1500 символов): ---")
-            print(rendered_html_output[-1500:]) # Полезно для анализа, что именно рендерится
-            print("--- Конец сниппета ---")
-        
-        # Дополнительная проверка: ищем сам тег script FullCalendar
-        fullcalendar_script_tag = "<script src=\"/static/grafik/vendor/fullcalendar/index.global.min.js\"></script>"
-        if fullcalendar_script_tag in rendered_html_output:
-            print(f"+++ УСПЕХ (диагностика): Тег подключения FullCalendar '{fullcalendar_script_tag}' НАЙДЕН.")
-        else:
-            print(f"--- ОШИБКА (диагностика): Тег подключения FullCalendar '{fullcalendar_script_tag}' НЕ НАЙДЕН.")
-
-        print("="*60)
-        print("КОНЕЦ ОТЛАДКИ РЕНДЕРИНГА БЛОКА EXTRAJS")
-        print("="*60 + "\n")
-
-    except Exception as e:
-        print(f"ОШИБКА при попытке отрендерить шаблон в строку для диагностики: {e}")
-    # --- КОНЕЦ ДИАГНОСТИЧЕСКОГО ВЫВОДА ---
 
     return render(request, 'admin/grafik/calendar_view.html', context)

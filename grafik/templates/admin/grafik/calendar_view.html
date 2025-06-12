@@ -3,24 +3,18 @@
 
 {% block title %}Календарь смен{% endblock %}
 
-{# --- ОБЯЗАТЕЛЬНО: Подключаем стандартные скрипты и стили Django admin, включая theme.js --- #}
 {% block extrahead %}
     {{ block.super }}
 {% endblock %}
 
 {% block extrastyle %}
     {{ block.super }}
-    {# <link rel="stylesheet" href="{% static 'grafik/vendor/fullcalendar/index.global.min.css' %}"> #}
-    
-    {# --- НАШ КАСТОМНЫЙ CSS ДЛЯ КАЛЕНДАРЯ --- #}
     <link rel="stylesheet" href="{% static 'grafik/css/custom_calendar.css' %}">
-    
     <style>
         #calendar {
             max-width: 1100px;
             margin: 40px auto;
         }
-        /* Другие инлайн-стили, если они специфичны только для этой страницы и не относятся к событиям */
     </style>
 {% endblock %}
 
@@ -32,89 +26,68 @@
 
 {% block extrajs %}
     {{ block.super }}
-    
-    <script src="{% static 'grafik/vendor/fullcalendar/index.global.min.js' %}"></script>
-    <script src="{% static 'grafik/vendor/fullcalendar/calendar_init.js' %}"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // --- ВРЕМЕННЫЙ ФИКС: Применяем theme-dark вручную, если тема выбрана как dark или auto+prefers-dark ---
-            // Это не будет мешать стандартному theme.js, но поможет при кастомных view.
-            var theme = localStorage.getItem('django.colorTheme') || 'auto';
-            var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-            if (theme === 'dark' || (theme === 'auto' && prefersDark)) {
-                document.body.classList.add('theme-dark');
-            } else {
-                document.body.classList.remove('theme-dark');
-            }
+      var emptyDays = {{ empty_days|safe }};
+      var emptyHex = "{{ empty_hex }}";
+    </script>
+    <script src="{% static 'grafik/vendor/fullcalendar/index.global.min.js' %}"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var calendarEl = document.getElementById('calendar');
+        if (!calendarEl) return;
+        var eventsUrl = calendarEl.dataset.eventsUrl;
 
-            console.log('FullCalendar initialization script started');
-            var calendarEl = document.getElementById('calendar');
-            if (calendarEl) {
-                var eventsUrl = calendarEl.dataset.eventsUrl;
-                console.log('Events URL for FullCalendar:', eventsUrl);
-
-                var calendar = new FullCalendar.Calendar(calendarEl, {
-                    initialView: 'dayGridMonth',
-                    headerToolbar: {
-                        left: 'prev,next today',
-                        center: 'title',
-                        right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
-                    },
-                    locale: 'ru',
-                    buttonText: {
-                        today: 'Сегодня',
-                        month: 'Месяц',
-                        week: 'Неделя',
-                        day: 'День',
-                        list: 'Список'
-                    },
-                    events: eventsUrl,
-                    loading: function(isLoading) {
-                        if (isLoading) {
-                            console.log('FullCalendar is loading events...');
-                        } else {
-                            console.log('FullCalendar has finished loading events.');
-                        }
-                    },
-                    eventDataTransform: function(eventData) {
-                        return eventData;
-                    },
-                    eventClick: function(info) {
-                        console.log('Event clicked:', info.event);
-                        let eventDetails = `Событие: ${info.event.extendedProps.employee_name || info.event.title}`;
-                        if (info.event.extendedProps.shift_time_str) {
-                            eventDetails += `\nВремя: ${info.event.extendedProps.shift_time_str}`;
-                        }
-                        eventDetails += `\nID: ${info.event.id}`;
-                        alert(eventDetails);
-                        
-                        if (info.event.id) {
-                           console.log(`Предполагаемый URL для редактирования: /admin/grafik/shift/${info.event.id}/change/`);
-                           // window.location.href = `/admin/grafik/shift/${info.event.id}/change/`;
-                        }
-                    },
-                    // --- ИЗМЕНЕННАЯ ФУНКЦИЯ eventContent ---
-                    eventContent: function(arg) {
-                        let employeeName = arg.event.extendedProps.employee_name || arg.event.title;
-                        let shiftTime = arg.event.extendedProps.shift_time_str;
-
-                        // Используем НАШИ кастомные CSS-классы
-                        let innerHtml = `<div class="fc-event-main-custom-frame">`; // Наша общая обертка
-                        innerHtml +=    `<div class="fc-event-employee-name">${employeeName}</div>`; // Наш класс для имени
-                        if (shiftTime) {
-                            innerHtml += `<div class="fc-event-shift-time">${shiftTime}</div>`; // Наш класс для времени (БЕЗ ИНЛАЙН-СТИЛЕЙ)
-                        }
-                        innerHtml += `</div>`; // Закрываем fc-event-main-custom-frame
-                        
-                        return { html: innerHtml };
-                    }
-                    // --- КОНЕЦ ИЗМЕНЕННОЙ ФУНКЦИИ eventContent ---
-                });
-                calendar.render();
-                console.log('FullCalendar rendered');
-            } else {
-                console.error('Calendar element #calendar not found!');
+        var calendar = new FullCalendar.Calendar(calendarEl, {
+            initialView: 'dayGridMonth',
+            headerToolbar: {
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+            },
+            locale: 'ru',
+            buttonText: {
+                today: 'Сегодня',
+                month: 'Месяц',
+                week: 'Неделя',
+                day: 'День',
+                list: 'Список'
+            },
+            events: eventsUrl,
+            eventContent: function(arg) {
+                let employeeName = arg.event.extendedProps.employee_name || arg.event.title;
+                let shiftTime = arg.event.extendedProps.shift_time_str;
+                let innerHtml = `<div class="fc-event-main-custom-frame">`;
+                innerHtml += `<div class="fc-event-employee-name">${employeeName}</div>`;
+                if (shiftTime) {
+                    innerHtml += `<div class="fc-event-shift-time">${shiftTime}</div>`;
+                }
+                innerHtml += `</div>`;
+                return { html: innerHtml };
             }
         });
+
+        calendar.render();
+
+        function highlightEmptyDays() {
+            var allEvents = calendar.getEvents();
+            var eventDays = new Set();
+            allEvents.forEach(function(ev) {
+                var d = ev.start.toISOString().slice(0,10);
+                eventDays.add(d);
+            });
+            document.querySelectorAll('.fc-daygrid-day').forEach(function(dayCell) {
+                var cellDate = dayCell.getAttribute('data-date');
+                if (!eventDays.has(cellDate) && emptyDays.includes(cellDate)) {
+                    dayCell.style.backgroundColor = emptyHex;
+                } else {
+                    dayCell.style.backgroundColor = "";
+                }
+            });
+        }
+
+        calendar.on('eventsSet', highlightEmptyDays);
+        calendar.on('datesSet', highlightEmptyDays);
+        setTimeout(highlightEmptyDays, 1000);
+    });
     </script>
 {% endblock %}
