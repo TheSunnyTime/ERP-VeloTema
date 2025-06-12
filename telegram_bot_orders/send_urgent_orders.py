@@ -1,15 +1,19 @@
 import sqlite3
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from datetime import datetime
+from datetime import datetime, time, timedelta
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import pytz
 
 TOKEN = "7763554734:AAGDA226E22vMeqpCTh7w6HlSLGct8W3pyY"
 DB_PATH = "../db.sqlite3"  # путь к базе
 
+# ID чата, куда слать авторассылку (укажи свой chat_id, если нужно в группу или себе)
+CHAT_ID = "ТВОЙ_CHAT_ID"
+
 def get_orders(order_type_id, limit):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # Для ремонта добавляем repaired_item
     if order_type_id == 1:
         cursor.execute("""
             SELECT id, status, due_date, repaired_item
@@ -21,7 +25,7 @@ def get_orders(order_type_id, limit):
             ORDER BY due_date ASC, id ASC
             LIMIT ?
         """, (limit,))
-    else:  # Для продажи поле repaired_item не нужно
+    else:
         cursor.execute("""
             SELECT id, status, due_date
             FROM orders_order 
@@ -41,7 +45,7 @@ def rus_status(status):
     if status == "new":
         return "Новый"
     if status == "in_progress":
-        return "в работе"
+        return "В работе"
     if status == "awaiting":
         return "Ожидает"
     return status
@@ -53,8 +57,7 @@ def format_date(due_date):
     except Exception:
         return due_date
 
-async def hot_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Получаем 3 ремонта и 3 продажи
+async def send_hot_orders(context: ContextTypes.DEFAULT_TYPE):
     repairs = get_orders(1, 3)
     sales = get_orders(2, 3)
     text = ""
@@ -81,11 +84,21 @@ async def hot_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"Срок: {format_date(due_date)}\n"
                 )
 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text)
+    await context.bot.send_message(chat_id=CHAT_ID, text=text)
+
+async def hot_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_hot_orders(context)
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("hot_orders", hot_orders_command))
+
+    # Настраиваем планировщик
+    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Europe/Moscow'))
+    # Каждый день в 10:00 по московскому времени
+    scheduler.add_job(send_hot_orders, 'cron', hour=10, minute=0, args=[app.bot])
+    scheduler.start()
+
     app.run_polling()
 
 if __name__ == "__main__":
