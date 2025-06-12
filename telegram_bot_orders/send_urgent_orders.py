@@ -14,7 +14,7 @@ def get_orders(order_type_id, limit):
         cursor.execute("""
             SELECT id, status, due_date, repaired_item
             FROM orders_order 
-            WHERE status NOT IN ('done', 'ready', 'issued')
+            WHERE status NOT IN ('done', 'ready', 'issued', 'cancelled')
               AND due_date IS NOT NULL
               AND due_date != '-'
               AND order_type_id = 1
@@ -25,7 +25,7 @@ def get_orders(order_type_id, limit):
         cursor.execute("""
             SELECT id, status, due_date
             FROM orders_order 
-            WHERE status NOT IN ('done', 'ready', 'issued')
+            WHERE status NOT IN ('done', 'ready', 'issued', 'cancelled')
               AND due_date IS NOT NULL
               AND due_date != '-'
               AND order_type_id = 2
@@ -67,7 +67,7 @@ async def hot_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for order in repairs:
                 order_id, status, due_date, repaired_item = order
                 text += (
-                    f"• Заказ {order_id} | статус: {rus_status(status)} | "
+                    f"• Заказ {order_id} | Статус: {rus_status(status)} | "
                     f"Изделие: {repaired_item} | Срок: {format_date(due_date)}\n"
                 )
         if sales:
@@ -77,7 +77,7 @@ async def hot_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for order in sales:
                 order_id, status, due_date = order
                 text += (
-                    f"• Заказ {order_id} | статус: {rus_status(status)} | "
+                    f"• Заказ {order_id} | Статус: {rus_status(status)} | "
                     f"Срок: {format_date(due_date)}\n"
                 )
 
