@@ -1,15 +1,18 @@
 import sqlite3
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
+import os
+REGISTERED_CHAT_FILE = "registered_chat_id.txt"
 
 TOKEN = "7763554734:AAGDA226E22vMeqpCTh7w6HlSLGct8W3pyY"
 DB_PATH = "../db.sqlite3"  # путь к базе
 
-# ID чата, куда слать авторассылку (укажи свой chat_id, если нужно в группу или себе)
-CHAT_ID = "ТВОЙ_CHAT_ID"
+# id чата для авторассылки (туда бот будет слать сообщения сам каждый день)
+CHAT_ID = "ТВОЙ_CHAT_ID"  # подставь сюда реальный chat_id для авторассылки!
 
 def get_orders(order_type_id, limit):
     conn = sqlite3.connect(DB_PATH)
@@ -56,8 +59,30 @@ def format_date(due_date):
         return dt.strftime("%d.%m")
     except Exception:
         return due_date
+    
+def save_chat_id(chat_id):
+    # Сохраняем chat_id в файл, если его там еще нет
+    chat_id = str(chat_id)
+    if not os.path.exists(REGISTERED_CHAT_FILE):
+        with open(REGISTERED_CHAT_FILE, "w") as f:
+            f.write(chat_id + "\n")
+    else:
+        with open(REGISTERED_CHAT_FILE, "r") as f:
+            lines = f.read().splitlines()
+        if chat_id not in lines:
+            with open(REGISTERED_CHAT_FILE, "a") as f:
+                f.write(chat_id + "\n")
 
-async def send_hot_orders(context: ContextTypes.DEFAULT_TYPE):
+def load_first_chat_id():
+    # Загружаем первый chat_id из файла для авторассылки
+    if os.path.exists(REGISTERED_CHAT_FILE):
+        with open(REGISTERED_CHAT_FILE, "r") as f:
+            lines = f.read().splitlines()
+        if lines:
+            return int(lines[0])
+    return None
+
+async def send_hot_orders(bot, chat_id):
     repairs = get_orders(1, 3)
     sales = get_orders(2, 3)
     text = ""
@@ -84,22 +109,42 @@ async def send_hot_orders(context: ContextTypes.DEFAULT_TYPE):
                     f"Срок: {format_date(due_date)}\n"
                 )
 
-    await context.bot.send_message(chat_id=CHAT_ID, text=text)
+    await bot.send_message(chat_id=chat_id, text=text)
 
 async def hot_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_hot_orders(context)
+    await send_hot_orders(context.bot, update.effective_chat.id)
 
-def main():
+async def register_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    save_chat_id(chat_id)
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"Этот чат зарегистрирован для авторассылки! chat_id: {chat_id}"
+    )
+
+async def scheduled_send_hot_orders(app):
+    chat_id = load_first_chat_id()
+    if chat_id:
+        await send_hot_orders(app.bot, chat_id)
+    else:
+        print("Нет зарегистрированного chat_id для рассылки.")
+
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("hot_orders", hot_orders_command))
+    app.add_handler(CommandHandler("register_chat", register_chat_command))  # новая команда
 
-    # Настраиваем планировщик
     scheduler = AsyncIOScheduler(timezone=pytz.timezone('Europe/Moscow'))
-    # Каждый день в 10:00 по московскому времени
-    scheduler.add_job(send_hot_orders, 'cron', hour=10, minute=0, args=[app.bot])
+    scheduler.add_job(scheduled_send_hot_orders, 'cron', hour=10, minute=0, args=[app])
     scheduler.start()
 
-    app.run_polling()
+    print("Бот и рассылка запущены.")
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
