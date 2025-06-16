@@ -13,6 +13,7 @@ from suppliers.models import SupplyItem, Supply
 from orders.models import OrderProductItem, Order # Order уже импортирован
 # Импортируем OrderStatusColor
 from uiconfig.models import SupplyStatusColor, OrderStatusColor # <--- ДОБАВЛЕН OrderStatusColor
+from .search_utils import get_product_search_queryset
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
@@ -89,6 +90,7 @@ class SupplyItemInlineForProduct(admin.TabularInline):
 
 class OrderProductItemInlineForProduct(admin.TabularInline):
     model = OrderProductItem
+    autocomplete_fields = ['product']  # Эта строка включает автодополнение товаров
     fk_name = 'product'
     extra = 0
     can_delete = False
@@ -185,41 +187,34 @@ class ProductAdmin(admin.ModelAdmin):
     list_filter = ('category', 'is_active' if hasattr(Product, 'is_active') else 'category')
     search_fields = ('name', 'sku') 
     autocomplete_fields = ('category',)
-    
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-    readonly_fields_list = ['stock_quantity', 'cost_price'] # Добавляем поля сюда
+
+    # readonly_fields формируем универсально
+    readonly_fields_list = ['stock_quantity', 'cost_price']
     if hasattr(Product, 'created_at'): 
         readonly_fields_list.append('created_at')
     if hasattr(Product, 'updated_at'): 
         readonly_fields_list.append('updated_at')
-    readonly_fields = tuple(set(readonly_fields_list)) # set для уникальности, если вдруг дубли
-    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
-    
+    readonly_fields = tuple(set(readonly_fields_list))
+
     inlines = [SupplyItemInlineForProduct, OrderProductItemInlineForProduct]
 
     def get_search_results(self, request, queryset, search_term):
-        queryset_standard, use_distinct_standard = super().get_search_results(request, queryset, search_term)
+        # Только наш расширенный поиск, без стандартного Django
         if search_term:
-            custom_search_fields = ['name', 'sku']
-            q_objects = Q()
-            for field_name in custom_search_fields:
-                q_objects |= Q(**{f"{field_name}__iregex": search_term})
-            
-            queryset_custom = queryset.filter(q_objects)
-            queryset = queryset_custom
-            use_distinct = True 
+            queryset = get_product_search_queryset(queryset, search_term, fields=['name', 'sku'])
+            use_distinct = False
         else:
-            queryset = queryset_standard
-            use_distinct = use_distinct_standard
-            
+            use_distinct = False
         return queryset, use_distinct
 
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
-            path('reset-all-stock/', 
-                 self.admin_site.admin_view(self.reset_all_stock_view), 
-                 name='products_product_reset_all_stock')
+            path(
+                'reset-all-stock/', 
+                self.admin_site.admin_view(self.reset_all_stock_view), 
+                name='products_product_reset_all_stock'
+            )
         ]
         return custom_urls + urls
 

@@ -3,6 +3,7 @@ from django import forms # <--- Добавлен импорт forms
 from django.contrib import admin
 from django.utils.html import format_html
 from decimal import Decimal
+from orders.forms import OrderProductItemForm  # <---- ВАЖНО! Абсолютный импорт
 
 from ..models import OrderProductItem, OrderServiceItem, Order, Product, Service # <--- Добавлены Product и Service
 
@@ -49,7 +50,7 @@ class OrderProductItemAdminForm(forms.ModelForm):
 
 class OrderProductItemInline(admin.TabularInline):
     model = OrderProductItem
-    form = OrderProductItemAdminForm # <--- Используем кастомную форму
+    form = OrderProductItemForm  # вот это главное!
     extra = 0 
     autocomplete_fields = ['product']
     
