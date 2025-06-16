@@ -6,14 +6,32 @@ from orders.models import Order
 class OrderInline(admin.TabularInline):
     model = Order
     can_delete = False
-    fields = ['id', 'order_type', 'colored_status', 'order_total', 'created_at']
-    readonly_fields = ['id', 'order_type', 'colored_status', 'order_total', 'created_at']
+    fields = ['order_link', 'order_type_readonly', 'colored_status', 'order_total', 'created_at']
+    readonly_fields = ['order_link', 'order_type_readonly', 'colored_status', 'order_total', 'created_at']
     extra = 0
     show_change_link = True
     ordering = ['-created_at']
 
+    def has_add_permission(self, request, obj):
+        # Убираем кнопку "Добавить ещё один Заказ"
+        return False
+
+    def order_link(self, obj):
+        url = f"/admin/orders/order/{obj.id}/change/"
+        date_str = obj.created_at.strftime('%d.%m.%Y %H:%M')
+        return format_html(
+            '<a href="{}" target="_blank">Заказ №{} от {}</a>',
+            url,
+            obj.id,
+            date_str
+        )
+    order_link.short_description = 'Заказ'
+
+    def order_type_readonly(self, obj):
+        return obj.order_type.name if obj.order_type else "-"
+    order_type_readonly.short_description = 'Тип заказа'
+
     def colored_status(self, obj):
-        # Подсветка статуса (замени цвета под себя)
         color_map = {
             'new': 'orange',
             'in_progress': 'blue',
@@ -53,9 +71,8 @@ class ClientAdmin(admin.ModelAdmin):
     )
     class Media:
         js = (
-         # УБИРАЕМ 'admin/js/jquery.init.js', # Django сам загрузит jQuery и создаст django.jQuery
-            'vendor/inputmask/jquery.inputmask.js', # Путь к библиотеке Inputmask
-            'clients/js/client_form_masks.js',      # Путь к твоему кастомному JS
+            'vendor/inputmask/jquery.inputmask.js',
+            'clients/js/client_form_masks.js',
         )
 
 class ClientGroupAdmin(admin.ModelAdmin):
@@ -64,4 +81,3 @@ class ClientGroupAdmin(admin.ModelAdmin):
 
 admin.site.register(ClientGroup, ClientGroupAdmin)
 admin.site.register(Client, ClientAdmin)
-
