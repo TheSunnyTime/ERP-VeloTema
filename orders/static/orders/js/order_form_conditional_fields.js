@@ -1,7 +1,16 @@
 // orders/static/orders/js/order_form_conditional_fields.js
+
 if (window.django && window.django.jQuery) {
     (function($) {
         $(document).ready(function() {
+            var orderStatusMarker = document.getElementById('order-status-marker');
+            var orderStatus = orderStatusMarker ? orderStatusMarker.value : null;
+            var disabledStatuses = ['issued', 'cancelled']; // ключи такие же, как в Order.STATUS_ISSUED и Order.STATUS_CANCELLED
+
+            if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
+                console.log('[OrderJS] Динамика отключена для статуса: ' + orderStatus);
+                return;
+            }
             console.log('[ConditionalFields] Initializing conditional fields logic...');
             var orderTypeSelect = $('#id_order_type');
             var performerRow = $('.form-row.field-performer');

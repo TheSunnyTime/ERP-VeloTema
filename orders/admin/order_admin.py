@@ -97,6 +97,44 @@ class OrderAdmin(admin.ModelAdmin):
         return current_queryset, use_distinct
     # --- КОНЕЦ ОБНОВЛЕННОГО МЕТОДА ---
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        params = request.GET
+
+        # Проверяем, что это именно список заказов (а не страница редактирования)
+        # Обычно list_view определяется так:
+        if request.path.endswith('/order/'):
+            # Если есть фильтр, поиск или пагинация — показываем все заказы
+            if (
+                params.get('q')
+                or params.get('status')
+                or params.get('status__exact')
+                or params.get('order_type')
+                or params.get('due_date')
+                or params.get('manager')
+                or params.get('performer')
+                or params.get('p')
+                or params.get('e') == '1'
+            ):
+                return qs
+
+            # Если фильтров нет — скрываем "выданные" и "отменённые"
+            excluded_statuses = [Order.STATUS_ISSUED, Order.STATUS_CANCELLED]
+            return qs.exclude(status__in=excluded_statuses)
+
+        # На всех других страницах (например, редактирование заказа) — ничего не скрываем
+        return qs
+    
+    def client_phone_display(self, obj):
+        if obj and obj.client and obj.client.phone:
+            # Форматируем номер: +375 (29) 123-45-67
+            raw = obj.client.phone
+            if len(raw) == 12 and raw.startswith('375'):
+                return f'+375 ({raw[3:5]}) {raw[5:8]}-{raw[8:10]}-{raw[10:12]}'
+            return raw
+        return "-"
+    client_phone_display.short_description = "Телефон клиента"
+
     @property
     def status_colors_map(self):
         # ... (без изменений) ...
@@ -234,7 +272,7 @@ class OrderAdmin(admin.ModelAdmin):
 
     def get_fieldsets(self, request, obj=None):
         # ... (без изменений) ...
-        main_fields_tuple = ('client', 'manager', 'performer', 'order_type', 'repaired_item', 'status', 'notes')
+        main_fields_tuple = ('client', 'client_phone_display', 'manager', 'performer', 'order_type', 'repaired_item', 'status', 'notes')
         payment_closure_fieldset_fields = ['payment_method_on_closure']
         if request.user.is_superuser or request.user.has_perm('orders.can_view_target_cash_register'):
             payment_closure_fieldset_fields.append('target_cash_register')
@@ -263,7 +301,7 @@ class OrderAdmin(admin.ModelAdmin):
         # ... (без изменений) ...
         print(f"[GetReadonlyFields] Called. obj: {obj}, obj.pk: {obj.pk if obj else 'N/A'}, obj.status: {obj.status if obj and obj.pk else 'N/A'}")
 
-        current_readonly_fields = ['created_at', 'updated_at', 'get_total_order_amount_display']
+        current_readonly_fields = ['created_at', 'updated_at', 'get_total_order_amount_display','client_phone_display']
         current_readonly_fields.append('due_date')
 
         db_obj = None
@@ -280,8 +318,8 @@ class OrderAdmin(admin.ModelAdmin):
             if not user_can_edit_manager:
                 current_readonly_fields.append('manager')
 
-            if object_to_check.status == Order.STATUS_ISSUED:
-                current_readonly_fields.extend(['status', 'payment_method_on_closure', 'client', 'manager', 'performer', 'order_type'])
+            if object_to_check.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED):
+                current_readonly_fields.extend(['status', 'payment_method_on_closure', 'client', 'manager', 'performer', 'order_type', 'repaired_item'])
             else:
                 if not request.user.has_perm('orders.can_change_order_type_dynamically'):
                     current_readonly_fields.append('order_type')
@@ -294,6 +332,7 @@ class OrderAdmin(admin.ModelAdmin):
 
         print(f"[GetReadonlyFields] Returning: {current_readonly_fields}")
         return tuple(set(current_readonly_fields))
+    
 
 
     def get_form(self, request, obj=None, **kwargs):

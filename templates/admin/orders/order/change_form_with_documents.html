@@ -2,6 +2,11 @@
 {% load i18n admin_urls %}
 
 {% block object-tools %}
+    {# Скрытое поле для статуса заказа — нужно для js! #}
+    {% if original %}
+        <input type="hidden" id="order-status-marker" value="{{ original.status }}">
+    {% endif %}
+
     {# Сначала стандартные инструменты объекта (кнопки Сохранить и т.д.) #}
     {{ block.super }}
 
@@ -12,12 +17,9 @@
             <ul class="object-tools">
                 {% for template in available_document_templates %}
                     <li>
-                        {# original - это переменная контекста в change_form.html, содержащая текущий объект (Заказ) #}
-                        {# Мы используем current_object_id, который передали из view OrderAdmin.change_view #}
-                        {# ----- ИСПРАВЛЕНИЕ ЗДЕСЬ ----- #}
                         <a href="{% url 'utils:generate_document' template.id current_object_id %}" 
                            class="button" 
-                           target="_blank"> {# Открываем в новой вкладке #}
+                           target="_blank">
                             {{ template.name }}
                         </a>
                     </li>

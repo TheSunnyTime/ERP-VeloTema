@@ -1,13 +1,20 @@
 // F:\CRM 2.0\ERP\orders\static\orders\js\order_form_price_updater.js
+
 document.addEventListener('DOMContentLoaded', function() {
-    // console.log('[DOM] ContentLoaded: Initializing order form updater and type determiner.');
+
+var orderStatusMarker = document.getElementById('order-status-marker');
+var orderStatus = orderStatusMarker ? orderStatusMarker.value : null;
+var disabledStatuses = ['issued', 'cancelled']; // ключи такие же, как в Order.STATUS_ISSUED и Order.STATUS_CANCELLED
+
+if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
+    console.log('[OrderJS] Динамика отключена для статуса: ' + orderStatus);
+    return;
+}
 
     if (typeof django !== 'undefined' && typeof django.jQuery !== 'undefined') {
         const $ = django.jQuery;
         console.log('[PriceUpdater] Initializing...');
-        let pageFullyInitialized = false; // <--- НОВЫЙ ФЛАГ ДЛЯ ОТСЛЕЖИВАНИЯ ПОЛНОЙ ИНИЦИАЛИЗАЦИИ
-
-        // СНАЧАЛА ВСЕ ОПРЕДЕЛЕНИЯ ФУНКЦИЙ:
+        let pageFullyInitialized = false;
 
         function parseFloatSafely(value) {
             if (typeof value === 'string') {
@@ -22,12 +29,10 @@ document.addEventListener('DOMContentLoaded', function() {
             const $orderTypeReadonlyDiv = $('div.field-order_type div.readonly');
 
             if (window.location.pathname.includes('/add/')) {
-                // console.log('[OrderTypeAPI] Add page, skipping API call for now.');
                 return;
             }
 
             if (!$orderTypeSelect.length && !$orderTypeReadonlyDiv.length) {
-                // console.warn('[OrderTypeAPI] Order type select field AND readonly display not found. Exiting.');
                 return;
             }
 
@@ -36,7 +41,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const $productSelect = $(this).find('select[name$="-product"]');
                 if ($productSelect.length && $productSelect.val()) {
                     hasProducts = true;
-                    return false; // Прерываем цикл .each
+                    return false;
                 }
             });
 
@@ -45,12 +50,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 const $serviceSelect = $(this).find('select[name$="-service"]');
                 if ($serviceSelect.length && $serviceSelect.val()) {
                     hasServices = true;
-                    return false; // Прерываем цикл .each
+                    return false;
                 }
             });
 
             const apiUrl = '/orders-api/api/determine-order-type/';
-            // console.log(`[OrderTypeAPI] Calling API. Has Products: ${hasProducts}, Has Services: ${hasServices}`);
 
             $.ajax({
                 url: apiUrl,
@@ -60,7 +64,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     'has_services': hasServices
                 },
                 success: function(response) {
-                    // console.log('[OrderTypeAPI] Raw API Response:', response);
                     if (response.order_type_id !== null && typeof response.order_type_name !== 'undefined') {
                         let successfullyUpdatedDisplay = false;
                         let typeActuallyChanged = false;
@@ -70,17 +73,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             if ($optionToSelect.length > 0) {
                                 if (String($orderTypeSelect.val()) !== String(response.order_type_id)) {
                                     $orderTypeSelect.val(response.order_type_id);
-                                    if ($orderTypeSelect.data('select2')) { // Если используется Select2
+                                    if ($orderTypeSelect.data('select2')) {
                                         $orderTypeSelect.trigger('change.select2');
                                     } else {
                                         $orderTypeSelect.trigger('change');
                                     }
-                                    // console.log('[OrderTypeAPI] SELECT field updated to:', response.order_type_name, '(ID:', response.order_type_id, ')');
                                     typeActuallyChanged = true;
                                 }
                                 successfullyUpdatedDisplay = true;
-                            } else {
-                                // console.warn('[OrderTypeAPI] Option with value', response.order_type_id, 'NOT FOUND in #id_order_type select list.');
                             }
                         }
 
@@ -88,19 +88,17 @@ document.addEventListener('DOMContentLoaded', function() {
                             const currentTextInReadonly = $orderTypeReadonlyDiv.find('a').length ? $orderTypeReadonlyDiv.find('a').text().trim() : $orderTypeReadonlyDiv.text().trim();
                             if (currentTextInReadonly.toLowerCase() !== response.order_type_name.trim().toLowerCase()) {
                                 const $linkInsideReadonly = $orderTypeReadonlyDiv.find('a');
-                                if ($linkInsideReadonly.length) { // Если внутри есть ссылка (например, на модель типа заказа)
+                                if ($linkInsideReadonly.length) {
                                     $linkInsideReadonly.text(response.order_type_name);
                                 } else {
                                     $orderTypeReadonlyDiv.text(response.order_type_name);
                                 }
-                                // console.log('[OrderTypeAPI] READONLY field text updated to:', response.order_type_name);
                                 typeActuallyChanged = true;
                             }
                         }
 
                         if (typeActuallyChanged) {
                             $(document).trigger('order_type_dynamically_updated');
-                            // console.log('[OrderTypeAPI] Triggered custom event "order_type_dynamically_updated".');
                         }
 
                     } else if (response.error) {
@@ -112,7 +110,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         }
-
 
         function updateOrderTotal() {
             let overallTotal = 0;
@@ -188,6 +185,7 @@ document.addEventListener('DOMContentLoaded', function() {
             determineOrderTypeViaAPI();
         }
 
+        // Функция обновления цены и стока с учетом флага ручного изменения
         function fetchAndUpdatePriceAndStock(selectElement, priceFieldIdentifierInModel, apiUrlPrefix, priceJsonKey, stockJsonKey, costPriceJsonKey = 'cost_price', isUserInteraction = false, stockDisplaySuffix = " шт.") {
             const $selectElement = $(selectElement);
             const selectedId = $selectElement.val();
@@ -208,6 +206,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             console.log(`[fetchAndUpdatePriceAndStock] Called for: ${selectName}, Selected ID: ${selectedId}, isUserInteraction: ${isUserInteraction}`);
 
+            // Важно: сбрасываем флаг ручного изменения только если это реально действие пользователя (выбор нового товара)
             if ($priceInput.length && isUserInteraction) {
                 const oldManualPriceFlag = $priceInput.attr('data-manual-price');
                 $priceInput.removeAttr('data-manual-price');
@@ -246,12 +245,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (stockJsonKey && $stockDisplayElement.length) { 
                             if (typeof data[stockJsonKey] !== 'undefined' && data[stockJsonKey] !== null) {
                                 let stockFromApi = parseInt(data[stockJsonKey], 10);
-                                console.log(`[StockUpdater] Product ID: ${selectedId}, Stock from API (raw): ${data[stockJsonKey]}, Parsed stockFromApi: ${stockFromApi}, Type: ${typeof stockFromApi}`);
-                                console.log(`[StockUpdater] stockDisplaySuffix: "${stockDisplaySuffix}", Type: ${typeof stockDisplaySuffix}`);
                                 let valueForText = stockFromApi; let suffixForText = stockDisplaySuffix; 
-                                console.log(`[StockUpdater] BEFORE CONCAT: valueForText = ${valueForText} (type: ${typeof valueForText}), suffixForText = "${suffixForText}" (type: ${typeof suffixForText})`);
                                 let textToDisplay = isNaN(valueForText) ? 'N/A' : String(valueForText) + suffixForText; 
-                                console.log(`[StockUpdater] Text to display for stock (AFTER CONCAT): "${textToDisplay}"`); 
                                 $stockDisplayElement.text(textToDisplay);
                             } else { $stockDisplayElement.text('N/A'); }
                         }
@@ -286,10 +281,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
+        // При выборе товара пользователем: считаем это ручным действием (isUserInteraction = true только после полной инициализации)
         $(document).on('change', '#product_items-group select[name$="-product"], #service_items-group select[name$="-service"]', function() {
-            console.log(`[Event] 'change' on select: ${$(this).attr('name')}, Value: ${$(this).val()}`);
-            const considerAsUserInteraction = pageFullyInitialized; // Используем флаг
-            console.log(`[Event 'change' on select] pageFullyInitialized: ${pageFullyInitialized}, considering as user interaction: ${considerAsUserInteraction}`);
+            const considerAsUserInteraction = pageFullyInitialized;
             if ($(this).attr('name').includes('-product')) {
                 fetchAndUpdatePriceAndStock(this, 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price', considerAsUserInteraction); 
             } else if ($(this).attr('name').includes('-service')) {
@@ -300,14 +294,17 @@ document.addEventListener('DOMContentLoaded', function() {
         $(document).on('input change', '#product_items-group input[name$="-quantity"], #service_items-group input[name$="-quantity"]', function() {
             const $row = $(this).closest('tr[class*="dynamic-"], .form-row[class*="dynamic-"]'); updateItemTotal($row);
         });
+
+        // Здесь мы всегда ставим ручной флаг, когда пользователь меняет цену
         $(document).on('input', '#product_items-group input[name$="-price_at_order"], #service_items-group input[name$="-price_at_order"]', function() {
             const $this = $(this);
             if (!$this.is('[readonly]') && $this.is(':visible')) { 
                 $this.attr('data-manual-price', 'true');
-                console.log(`[Event] 'input' on price field: ${$this.attr('name')}. data-manual-price SET to true. New value: ${$this.val()}`);
-                const $row = $this.closest('tr[class*="dynamic-"], .form-row[class*="dynamic-"]'); updateItemTotal($row); 
+                const $row = $this.closest('tr[class*="dynamic-"], .form-row[class*="dynamic-"]');
+                updateItemTotal($row); 
             }
         });
+
         $(document).on('formset:added', function(event, $rowFromArgs, formsetName) {
             let $row = $($rowFromArgs); 
             if (!($row && $row.length && typeof $row.find === 'function')) {
@@ -329,15 +326,22 @@ document.addEventListener('DOMContentLoaded', function() {
             updateOrderTotal(); determineOrderTypeViaAPI();
         });
 
+        // Автоматическая инициализация (при загрузке страницы и добавлении новых строк): всегда isUserInteraction = false!
         $('#product_items-group tr.dynamic-product_items:not(.empty-form), #product_items-group .dynamic-product_items.form-row:not(.empty-form)').each(function() {
             const $row = $(this); const $select = $row.find('select[name$="-product"]');
-            if ($select.length && $select.val()) { fetchAndUpdatePriceAndStock($select[0], 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price', false); } 
-            else { updateItemTotal($row); }
+            if ($select.length && $select.val()) {
+                fetchAndUpdatePriceAndStock($select[0], 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price', false);
+            } else {
+                updateItemTotal($row);
+            }
         });
         $('#service_items-group tr.dynamic-service_items:not(.empty-form), #service_items-group .dynamic-service_items.form-row:not(.empty-form)').each(function() {
             const $row = $(this); const $select = $row.find('select[name$="-service"]');
-            if ($select.length && $select.val()) { fetchAndUpdatePriceAndStock($select[0], 'price_at_order', '/orders-api/get-service-price/', 'price', null, null, false); } 
-            else { updateItemTotal($row); }
+            if ($select.length && $select.val()) {
+                fetchAndUpdatePriceAndStock($select[0], 'price_at_order', '/orders-api/get-service-price/', 'price', null, null, false);
+            } else {
+                updateItemTotal($row);
+            }
         });
         
         setTimeout(function() {

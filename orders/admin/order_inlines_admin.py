@@ -50,7 +50,7 @@ class OrderProductItemAdminForm(forms.ModelForm):
 
 class OrderProductItemInline(admin.TabularInline):
     model = OrderProductItem
-    form = OrderProductItemForm  # вот это главное!
+    form = OrderProductItemAdminForm  # <-- вот так!
     extra = 0 
     autocomplete_fields = ['product']
     
@@ -103,7 +103,7 @@ class OrderProductItemInline(admin.TabularInline):
         # Флаг data-manual-price будет управлять перезаписью из JS.
 
         parent_order = get_parent_order_from_request(request, obj)
-        if parent_order and parent_order.status == Order.STATUS_ISSUED:
+        if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED):
             # Если заказ выдан, все поля инлайна делаем readonly
             readonly.extend(['product', 'quantity', 'price_at_order'])
         
@@ -113,13 +113,13 @@ class OrderProductItemInline(admin.TabularInline):
 
     def has_add_permission(self, request, obj=None):
         parent_order = obj 
-        if parent_order and parent_order.status == Order.STATUS_ISSUED: 
+        if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED): 
             return False
         return super().has_add_permission(request, obj)
 
     def has_delete_permission(self, request, obj=None):
         parent_order = get_parent_order_from_request(request, obj)
-        if parent_order and parent_order.status == Order.STATUS_ISSUED: 
+        if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED): 
             return False
         return super().has_delete_permission(request, obj)
 
@@ -168,19 +168,19 @@ class OrderServiceItemInline(admin.TabularInline):
         # УБРАЛ ЭТО УСЛОВИЕ
 
         parent_order = get_parent_order_from_request(request, obj)
-        if parent_order and parent_order.status == Order.STATUS_ISSUED:
+        if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED):
             readonly.extend(['service', 'quantity', 'price_at_order'])
         return tuple(set(readonly))
 
     # has_add_permission и has_delete_permission без изменений
     def has_add_permission(self, request, obj=None):
         parent_order = obj
-        if parent_order and parent_order.status == Order.STATUS_ISSUED: 
+        if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED): 
             return False
         return super().has_add_permission(request, obj)
 
     def has_delete_permission(self, request, obj=None):
         parent_order = get_parent_order_from_request(request, obj)
-        if parent_order and parent_order.status == Order.STATUS_ISSUED: 
+        if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED): 
             return False
         return super().has_delete_permission(request, obj)

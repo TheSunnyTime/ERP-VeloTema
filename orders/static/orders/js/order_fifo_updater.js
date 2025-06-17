@@ -1,7 +1,18 @@
 // ERP/orders/static/orders/js/order_fifo_updater.js
+
 if (typeof django !== 'undefined' && typeof django.jQuery !== 'undefined') {
     (function($) {
         $(document).ready(function() {
+            
+        var orderStatusMarker = document.getElementById('order-status-marker');
+        var orderStatus = orderStatusMarker ? orderStatusMarker.value : null;
+        var disabledStatuses = ['issued', 'cancelled']; // ключи такие же, как в Order.STATUS_ISSUED и Order.STATUS_CANCELLED
+
+        if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
+            console.log('[OrderJS] Динамика отключена для статуса: ' + orderStatus);
+            return;
+        }
+
             console.log('[OrderFIFOUpdater] Initializing FIFO cost updater...');
 
             function updateFifoCostForInlineRow($row) {
