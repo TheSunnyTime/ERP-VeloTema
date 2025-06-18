@@ -340,3 +340,28 @@ class SupplyAdmin(admin.ModelAdmin):
                         messages.info(request, "Редактирование полей оприходованной поставки ограничено.")
                         
         return super().changeform_view(request, object_id, form_url, extra_context)
+
+# ДОБАВЬ ЭТО В КОНЕЦ ФАЙЛА, если ещё не было!
+@admin.register(SupplyItem)
+class SupplyItemAdmin(admin.ModelAdmin):
+    # ДОБАВЛЕНО/ИЗМЕНЕНО: показываем столбцы по партиям, включая резерв
+    list_display = (
+        'product',                        # Товар
+        'quantity_received',              # Сколько пришло по партии
+        'quantity_remaining_in_batch',    # Сколько осталось в партии (на складе)
+        'reserved_quantity',              # ДОБАВЛЕНО: сколько зарезервировано
+        'get_available_quantity',         # ДОБАВЛЕНО: сколько реально "свободно" для продажи
+        'cost_price_per_unit',            # Себестоимость этой партии
+        'supply',                         # К какой поставке относится партия
+    )
+    # Можно фильтровать по поставке и товару
+    list_filter = ('supply', 'product')
+    search_fields = ('product__name',)
+    # Эти поля только для чтения, чтобы их случайно не испортили
+    readonly_fields = ('quantity_received', 'cost_price_per_unit', 'supply')
+
+    # ДОБАВЛЕНО: функция для вычисления "Доступно"
+    def get_available_quantity(self, obj):
+        """Сколько можно реально продать (остаток минус резерв)."""
+        return obj.quantity_remaining_in_batch - obj.reserved_quantity
+    get_available_quantity.short_description = "Доступно"  # Название столбца

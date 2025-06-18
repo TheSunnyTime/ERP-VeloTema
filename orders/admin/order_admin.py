@@ -1,4 +1,5 @@
 # F:\CRM 2.0\erp\orders\admin\order_admin.py
+from ..fifo_order_writeoff import handle_order_items_fifo_writeoff
 from django.contrib import admin, messages
 from django.contrib.auth.models import User, Group
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -15,7 +16,7 @@ from ..deadlines.services import determine_and_update_order_due_date, is_order_c
 
 from ..models import Order, OrderType
 from ..forms import OrderAdminForm
-from ..fifo_logic import calculate_and_assign_fifo_cost
+from ..fifo_logic import calculate_and_assign_fifo_cost, revert_fifo_write_off
 
 from .order_inlines_admin import OrderProductItemInline, OrderServiceItemInline
 
@@ -601,12 +602,12 @@ class OrderAdmin(admin.ModelAdmin):
                 # order_instance уже содержит обновленные значения order_type и due_date
                 order_instance.save(update_fields=list(set(fields_to_update_at_end)))
 
-                if 'order_type' in fields_to_update_at_end:
-                    messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
-                if 'due_date' in fields_to_update_at_end:
-                    due_date_display = order_instance.due_date.strftime('%d.%m.%Y') if order_instance.due_date else "не установлен"
-                    messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {due_date_display}.")
-
+        if 'order_type' in fields_to_update_at_end:
+            messages.info(request, f"Тип заказа №{order_instance.id} автоматически определен/обновлен на '{order_instance.order_type}'.")
+        if 'due_date' in fields_to_update_at_end:
+            due_date_display = order_instance.due_date.strftime('%d.%m.%Y') if order_instance.due_date else "не установлен"
+            messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {due_date_display}.")
+        handle_order_items_fifo_writeoff(order_instance)
         print(f"[OrderAdmin SaveRelated] КОНЕЦ для заказа ID: {order_instance.id}")
 
 
@@ -617,6 +618,7 @@ class OrderAdmin(admin.ModelAdmin):
             'orders/js/order_fifo_updater.js',
             'orders/js/order_form_conditional_fields.js',
             'orders/js/adaptive_client_field.js',
+            'orders/js/order_form_available_updater.js', # <--- ДОБАВЬТЕ ЭТУ СТРОКУ
         )
         css = {
             'all': ('orders/css/admin_order_form.css',)

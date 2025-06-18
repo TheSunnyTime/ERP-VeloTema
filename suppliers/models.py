@@ -1,4 +1,5 @@
 from django.db import models, transaction
+from django.contrib import admin
 from django.db.models import F, Q
 from django.conf import settings
 from django.utils import timezone
@@ -396,6 +397,11 @@ class SupplyItem(models.Model):
         verbose_name="Остаток из этой партии на складе",
         help_text="Сколько единиц из этой конкретной поставки еще осталось на складе. Управляется автоматически.",
         default=0 # По умолчанию 0, обновляется при оприходовании или отмене.
+    )
+    reserved_quantity = models.PositiveIntegerField(
+        default=0,
+        verbose_name="В резерве (шт.)",
+        help_text="Сколько единиц из этой партии зарезервировано под заказы. Управляется автоматически."
     )
 
     class Meta:

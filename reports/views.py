@@ -30,13 +30,12 @@ from django.contrib import admin
 def stock_summary_report(request):
     if not request.user.is_superuser and not request.user.has_perm('reports.view_stock_summary_report'):
         raise PermissionDenied("У тебя нет прав для просмотра этого отчета.")
-    products_in_stock = Product.objects.filter(stock_quantity__gt=0).order_by('name')
     report_data = calculate_stock_report_data_fifo()
     profit_calculation_hint = "(Общая розничная стоимость - Общая FIFO себестоимость)"
     context = {
         **admin.site.each_context(request),
         'title': 'Отчет: Сводка по остаткам товаров (FIFO)',
-        'products_in_stock': products_in_stock,
+        'products_in_stock': report_data['products_data'],
         'total_cost_value': report_data['total_cost_fifo'],
         'total_retail_value': report_data['total_retail_value'],
         'expected_profit': report_data['expected_profit'],

@@ -82,6 +82,31 @@
       visibility: visible;
       opacity: 1;
     }
+        /* Стили для сортируемых заголовков */
+    .sortable {
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+      padding-right: 20px !important;
+    }
+    .sortable:hover {
+      background-color: var(--button-hover-bg, #e0e0e0);
+    }
+    .sortable::after {
+      content: "⇅";
+      position: absolute;
+      right: 5px;
+      color: #999;
+      font-size: 12px;
+    }
+    .sortable.asc::after {
+      content: "↑";
+      color: var(--link-fg, #447e9b);
+    }
+    .sortable.desc::after {
+      content: "↓";
+      color: var(--link-fg, #447e9b);
+    }
   </style>
 {% endblock %}
 
@@ -117,11 +142,16 @@
             </thead>
             <tbody>
               <tr>
-                <td>Общая себестоимость товаров на складе</td>
+                <td>
+                  Общая себестоимость доступных товаров на складе
+                  <div class="tooltip">
+                    &#9432;
+                    <span class="tooltiptext">Рассчитывается только по доступным (не зарезервированным) товарам</span>
+                  </div>
+                </td>
                 <td class="total-value">{{ total_cost_value|floatformat:2 }} руб.</td>
               </tr>
-              <tr>
-                <td>Общая розничная сумма всех товаров на складе</td>
+                <td>Общая розничная сумма доступных товаров на складе</td>
                 <td class="total-value">{{ total_retail_value|floatformat:2 }} руб.</td>
               </tr>
               <tr>
@@ -129,7 +159,7 @@
                   Ожидаемая прибыль от продажи всех товаров
                   <div class="tooltip">
                     &#9432;
-                    <span class="tooltiptext">{{ profit_calculation_hint }}</span>
+                    <span class="tooltiptext">Рассчитывается только по доступным (не зарезервированным) товарам</span>
                   </div>
                 </td>
                 <td class="total-value">{{ expected_profit|floatformat:2 }} руб.</td>
@@ -144,26 +174,28 @@
                 <thead>
                   <tr>
                     <th>Наименование товара</th>
-                    <th>Артикул</th>
-                    <th>Категория</th>
-                    <th style="text-align: right;">Остаток</th>
-                    <th style="text-align: right;">Себест. (ед.)</th>
-                    <th style="text-align: right;">Розн. цена (ед.)</th>
-                    <th style="text-align: right;">Общая себест.</th>
-                    <th style="text-align: right;">Общая розн. стоимость</th>
+                    <th style="width: 80px;">Артикул</th>
+                    <th style="width: 100px;">Категория</th>
+                    <th style="text-align: right;" class="sortable">Остаток</th>
+                    <th style="text-align: right;" class="sortable">Резерв</th>
+                    <th style="text-align: right;" class="sortable">Доступно</th>
+                    <th style="text-align: right;" class="sortable">Себест. (ед.)</th>
+                    <th style="text-align: right;" class="sortable">Розн. цена (ед.)</th>
+                    <th style="text-align: right;" class="sortable">Общая розн. стоимость</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {% for product in products_in_stock %}
+                  {% for item in products_in_stock %}
                     <tr class="{% cycle 'row1' 'row2' %}">
-                      <td>{{ product.name }}</td>
-                      <td>{{ product.sku|default_if_none:"" }}</td>
-                      <td>{{ product.category.name|default_if_none:"" }}</td>
-                      <td class="value">{{ product.stock_quantity }}</td>
-                      <td class="value">{{ product.cost_price|floatformat:2 }}</td> 
-                      <td class="value">{{ product.retail_price|floatformat:2 }}</td>
-                      <td class="value">{{ product.total_cost_value_in_stock|floatformat:2 }}</td> 
-                      <td class="value">{{ product.total_retail_value_in_stock|floatformat:2 }}</td>
+                      <td>{{ item.product.name }}</td>
+                      <td>{{ item.product.sku|default_if_none:"" }}</td>
+                      <td>{{ item.product.category.name|default_if_none:"" }}</td>
+                      <td class="value">{{ item.stock_quantity }}</td>
+                      <td class="value">{{ item.reserved_quantity }}</td>
+                      <td class="value">{{ item.available_quantity }}</td>
+                      <td class="value">{{ item.fifo_cost_per_unit|floatformat:2 }}</td>
+                      <td class="value">{{ item.retail_price|floatformat:2 }}</td>
+                      <td class="value">{{ item.total_retail_available|floatformat:2 }}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
@@ -176,4 +208,75 @@
       </div>
     </div>
   </div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Находим таблицу с товарами
+    const table = document.getElementById('result_list');
+    if (!table) return;
+    
+    const headers = table.querySelectorAll('thead th');
+    const tbody = table.querySelector('tbody');
+    
+    // Индексы колонок, которые можно сортировать (числовые)
+    const sortableColumns = [3, 4, 5, 6, 7, 8]; // Остаток, Резерв, Доступно, Себест, Розн.цена, Общая розн.
+    
+    // Добавляем класс сортировки к нужным заголовкам
+    headers.forEach((header, index) => {
+        if (sortableColumns.includes(index)) {
+            header.classList.add('sortable');
+            header.addEventListener('click', () => sortTable(index));
+        }
+    });
+    
+    let currentSort = { column: -1, direction: 'asc' };
+    
+    function sortTable(columnIndex) {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        
+        // Определяем направление сортировки
+        if (currentSort.column === columnIndex) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.direction = 'asc';
+        }
+        currentSort.column = columnIndex;
+        
+        // Убираем классы сортировки со всех заголовков
+        headers.forEach(h => h.classList.remove('asc', 'desc'));
+        // Добавляем класс к текущему заголовку
+        headers[columnIndex].classList.add(currentSort.direction);
+              
+        // Сортируем строки
+        rows.sort((a, b) => {
+            const aValue = getCellValue(a, columnIndex);
+            const bValue = getCellValue(b, columnIndex);
+            
+            // Сравниваем числовые значения
+            const aNum = parseFloat(aValue.replace(/[^\d.-]/g, '')) || 0;
+            const bNum = parseFloat(bValue.replace(/[^\d.-]/g, '')) || 0;
+            
+            if (currentSort.direction === 'asc') {
+                return aNum - bNum;
+            } else {
+                return bNum - aNum;
+            }
+        });
+        
+        // Перестраиваем таблицу
+        rows.forEach((row, index) => {
+            // Меняем классы для зебры
+            row.className = index % 2 === 0 ? 'row1' : 'row2';
+            tbody.appendChild(row);
+        });
+    }
+    
+    function getCellValue(row, columnIndex) {
+        const cell = row.querySelectorAll('td')[columnIndex];
+        return cell ? cell.textContent.trim() : '';
+    }
+});
+</script>
 {% endblock %}

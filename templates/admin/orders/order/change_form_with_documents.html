@@ -7,10 +7,8 @@
         <input type="hidden" id="order-status-marker" value="{{ original.status }}">
     {% endif %}
 
-    {# Сначала стандартные инструменты объекта (кнопки Сохранить и т.д.) #}
     {{ block.super }}
 
-    {# Затем добавляем наши кнопки для документов #}
     {% if available_document_templates %}
         <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--hairline-color);">
             <h4 style="margin-bottom: 5px;">{% translate "Сформировать документ:" %}</h4>
@@ -27,4 +25,37 @@
             </ul>
         </div>
     {% endif %}
+{% endblock %}
+
+{# --- ДОБАВЛЯЕМ СЮДА --- #}
+{% block inline_field_sets %}
+    {{ block.super }}
+    <script>
+        // Для визуального выделения столбца (по желанию)
+        document.addEventListener('DOMContentLoaded', function() {
+            let headers = document.querySelectorAll('th');
+            headers.forEach(function(th) {
+                if (th.textContent.trim() === 'На складе (тек.)') {
+                    let newTh = th.cloneNode(true);
+                    newTh.textContent = 'Доступно сейчас';
+                    th.after(newTh);
+                }
+            });
+            let rows = document.querySelectorAll('tbody tr');
+            rows.forEach(function(tr) {
+                let stockTd = tr.querySelector('td.field-get_current_stock');
+                if (stockTd) {
+                    // Берём доступно из скрытого поля, если Django вывел как readonly_field
+                    let availableTd = stockTd.cloneNode(true);
+                    let availableVal = tr.querySelector('td.field-available_quantity');
+                    if (availableVal) {
+                        availableTd.innerHTML = availableVal.innerHTML;
+                    } else {
+                        availableTd.innerHTML = '—';
+                    }
+                    stockTd.after(availableTd);
+                }
+            });
+        });
+    </script>
 {% endblock %}

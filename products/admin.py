@@ -179,7 +179,104 @@ class OrderProductItemInlineForProduct(admin.TabularInline):
     def has_change_permission(self, request, obj=None): return False
     def has_delete_permission(self, request, obj=None): return False
 
+class OrderProductItemReservationInlineForProduct(admin.TabularInline):
+    model = OrderProductItem
+    fk_name = 'product'
+    extra = 0
+    can_delete = False
+    verbose_name = "Резерв товара"
+    verbose_name_plural = "История резервирования этого товара"
 
+    _order_status_colors_map = None
+
+    @classmethod
+    def _initialize_order_status_colors(cls):
+        if cls._order_status_colors_map is None:
+            try:
+                cls._order_status_colors_map = {
+                    color.status_key: color.hex_color
+                    for color in OrderStatusColor.objects.all()
+                }
+            except Exception as e:
+                print(f"Warning: Could not load order status colors in Reservation: {e}")
+                cls._order_status_colors_map = {}
+    
+    def __init__(self, parent_model, admin_site):
+        super().__init__(parent_model, admin_site)
+        self.__class__._initialize_order_status_colors() 
+
+    # Ссылка на заказ с номером
+    def display_reservation_order_link(self, obj: OrderProductItem):
+        if obj.order:
+            link = reverse("admin:orders_order_change", args=[obj.order.id])
+            return format_html('<a href="{}">Заказ №{}</a>', link, obj.order.id)
+        return "N/A"
+    display_reservation_order_link.short_description = "Заказ №"
+
+    # Информация о клиенте и дате заказа
+    def display_reservation_client_and_date(self, obj: OrderProductItem):
+        if obj.order:
+            client_name = obj.order.client.get_full_name_or_company() if obj.order.client else "Клиент не указан"
+            return f"{client_name} ({obj.order.created_at.strftime('%d.%m.%Y')})"
+        return "N/A"
+    display_reservation_client_and_date.short_description = "Клиент (Дата заказа)"
+
+    # Цветной статус заказа (точно такой же как в продажах)
+    def colored_reservation_status(self, obj: OrderProductItem):
+        if not obj.order:
+            return "N/A"
+        
+        status_key = obj.order.status
+        status_display = obj.order.get_status_display()
+        
+        if self._order_status_colors_map:
+            hex_color = self._order_status_colors_map.get(status_key)
+            if hex_color:
+                try:
+                    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+                    text_color = '#ffffff' if (r * 0.299 + g * 0.587 + b * 0.114) < 128 else '#000000'
+                    return format_html(
+                        '<span style="background-color: {0}; padding: 2px 5px; border-radius: 3px; color: {1};"><strong>{2}</strong></span>',
+                        hex_color,
+                        text_color,
+                        status_display
+                    )
+                except ValueError:
+                    pass 
+        return status_display
+    colored_reservation_status.short_description = "Статус заказа"
+
+    # Количество зарезервированного товара
+    def display_reserved_quantity(self, obj: OrderProductItem):
+        return obj.quantity
+    display_reserved_quantity.short_description = "Количество зарезервировано"
+
+    # Цена товара на момент заказа
+    def display_reservation_price(self, obj: OrderProductItem):
+        return f"{obj.price_at_order}"
+    display_reservation_price.short_description = "Цена товара на момент заказа"
+
+    # Настройка полей для отображения
+    list_display_fields = (
+        'display_reservation_order_link',      # Ссылка на заказ
+        'display_reservation_client_and_date', # Клиент и дата
+        'colored_reservation_status',          # Цветной статус
+        'display_reserved_quantity',           # Количество зарезервировано
+        'display_reservation_price',           # Цена на момент заказа
+    )
+    
+    fields = list_display_fields 
+    readonly_fields = list_display_fields
+
+    # Показываем только товары из НЕ выданных и НЕ отмененных заказов (т.е. резервы)
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('order', 'order__client').exclude(
+            Q(order__status=Order.STATUS_ISSUED) | Q(order__status=Order.STATUS_CANCELLED)
+        ).order_by('-order__created_at')  # Сортируем по дате создания заказа (новые сверху)
+
+    def has_add_permission(self, request, obj=None): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
@@ -196,7 +293,7 @@ class ProductAdmin(admin.ModelAdmin):
         readonly_fields_list.append('updated_at')
     readonly_fields = tuple(set(readonly_fields_list))
 
-    inlines = [SupplyItemInlineForProduct, OrderProductItemInlineForProduct]
+    inlines = [SupplyItemInlineForProduct, OrderProductItemReservationInlineForProduct, OrderProductItemInlineForProduct]
 
     def get_search_results(self, request, queryset, search_term):
         # Только наш расширенный поиск, без стандартного Django
