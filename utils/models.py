@@ -4,6 +4,11 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.models import Group
 from django.conf import settings # Был нужен для зарплатных моделей, теперь может быть не нужен здесь
 from django.utils import timezone # Был нужен для зарплатных моделей, теперь может быть не нужен здесь
+# Импортируем модель заметок из отдельного файла
+from .notes.models import ServiceNote
+
+# Делаем модель доступной в админке utils
+__all__ = ['ServiceNote']
 
 # Импорты моделей из других приложений ForeignKey больше не нужны здесь, если они использовались только для зарплатных моделей
 # from orders.models import OrderType, Order, OrderServiceItem

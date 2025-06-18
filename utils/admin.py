@@ -4,6 +4,7 @@ from django.urls import path, reverse
 from django.http import HttpResponseRedirect
 from django.core.exceptions import PermissionDenied # Не используется напрямую в этом файле, но может быть полезно
 from django.utils.html import format_html
+from .notes.admin import ServiceNoteAdmin
 
 # Модели из .models текущего приложения (utils)
 from .models import (

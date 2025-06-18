@@ -2,6 +2,7 @@
 from django.urls import path, include
 from django.contrib import admin # Для admin.site.admin_view
 from . import views # Импортируем views из текущего приложения utils
+from reports.exports import export_stock_csv
 
 app_name = 'utils' # Пространство имен для URL-адресов этого приложения
 
@@ -32,5 +33,6 @@ urlpatterns = [
         name='api_get_employee_balance'
     ),
      path('export-stock-levels/', views.export_stock_levels_view, name='export_stock_levels'),
+     path('stock-export/', export_stock_csv, name='stock_export_csv'),
     # ---------------------------------------------
 ]
