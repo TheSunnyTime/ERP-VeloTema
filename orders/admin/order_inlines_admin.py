@@ -48,24 +48,20 @@ class BaseOrderProductItemFormSet(forms.BaseInlineFormSet):
             try:
                 product = Product.objects.get(pk=product_id)
                 
-                # Считаем, сколько товара на складе
-                total_stock = product.stock_quantity or 0
-                
-                # Считаем, сколько зарезервировано в ДРУГИХ заказах
-                reserved_query = OrderProductItem.objects.filter(
-                    product=product
-                ).exclude(
-                    Q(order__status=Order.STATUS_ISSUED) | Q(order__status=Order.STATUS_CANCELLED)
-                )
-                # Если редактируем заказ, исключаем его старые резервы
+                # ✅ ИСПРАВЛЕНИЕ: Правильно получаем доступный остаток
+                available_stock = product.get_available_stock_quantity  # БЕЗ СКОБОК
+
+                # Если редактируем заказ, учитываем что товар уже в этом заказе
                 if self.instance and self.instance.pk:
-                    reserved_query = reserved_query.exclude(order=self.instance)
-                                # Считаем общий резерв в других заказах
-                reserved_sum = reserved_query.aggregate(total_reserved=Sum('quantity'))
-                total_reserved_in_other_orders = reserved_sum.get('total_reserved') or 0
-                
-                # Вычисляем, сколько товара реально доступно для заказа
-                available_stock = total_stock - total_reserved_in_other_orders
+                    # Проверяем сколько этого товара уже в текущем заказе
+                    current_order_quantity = OrderProductItem.objects.filter(
+                        order=self.instance,
+                        product=product
+                    ).aggregate(total_in_order=Sum('quantity'))
+                    current_in_order = current_order_quantity.get('total_in_order') or 0
+                    
+                    # Добавляем это количество к доступному (так как оно не должно блокировать)
+                    available_stock += current_in_order
                 
                 # ГЛАВНАЯ ПРОВЕРКА: если нужно больше, чем доступно - показываем ошибку
                 if total_quantity_needed > available_stock:
@@ -107,7 +103,16 @@ class OrderProductItemInline(admin.TabularInline):
     form = OrderProductItemAdminForm
     formset = BaseOrderProductItemFormSet  # <--- ПОДКЛЮЧАЕМ НАШ ПРОВЕРЯЮЩИЙ КЛАСС
     extra = 0 
-    autocomplete_fields = ['product']
+    #autocomplete_fields = ['product']
+    # Настраиваем кастомный виджет для поля product
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "product":
+            # Используем наш кастомный автокомплит вместо стандартного
+            from dal import autocomplete
+            kwargs["widget"] = autocomplete.ModelSelect2(
+                url='products:product-autocomplete'  # Ссылка на наш автокомплит
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
     
     fields = (
         'product', 
@@ -124,38 +129,55 @@ class OrderProductItemInline(admin.TabularInline):
         'display_item_total'
     )
     
-    # Функция отображения "Доступно сейчас" с метками для JavaScript
+    # ✅ ИСПРАВЛЕНИЕ 2: Функция отображения "Доступно сейчас" с правильным расчетом
     def available_quantity(self, obj):
+        """Показывает сколько товара доступно для заказа прямо сейчас"""
+        # Если товар не выбран - показываем прочерк
         if not obj.product_id:
             return "—"
 
-        product = obj.product
-        total_stock = product.stock_quantity or 0
-            # Считаем резерв во всех других заказах
-        reserved_query = OrderProductItem.objects.filter(
-            product=product
-        ).exclude(
-            Q(order__status=Order.STATUS_ISSUED) | Q(order__status=Order.STATUS_CANCELLED)
-        )
-        if obj.order_id:
-            reserved_query = reserved_query.exclude(order_id=obj.order_id)
-        
-        reserved_sum = reserved_query.aggregate(total_reserved=Sum('quantity'))
-        total_reserved_in_other_orders = reserved_sum.get('total_reserved') or 0
-        
-        # Считаем доступное количество для этой строки
-        current_quantity = obj.quantity or 0
-        initial_available = total_stock - total_reserved_in_other_orders - current_quantity
+        try:
+            product = obj.product
+            
+            # Получаем ПРАВИЛЬНО доступный остаток (уже с учетом резерва!)
+            available_stock = product.get_available_stock_quantity
+            
+            # Общий остаток и резерв - для JavaScript
+            total_stock = product.get_real_stock_quantity
+            reserved_externally = total_stock - available_stock
+            
+            # Текущее количество в этом заказе
+            current_quantity = obj.quantity or 0
+            
+            # Если это существующий заказ, добавляем текущее количество к доступному
+            if obj.pk and obj.order_id:
+                # Для существующего товара показываем: доступный + уже заказанный
+                display_available = available_stock + current_quantity
+            else:
+                # Для нового товара показываем просто доступный
+                display_available = available_stock
+            
+            # Возвращаем HTML с ПРАВИЛЬНЫМИ данными для JavaScript
+            return format_html(
+                '<span class="available-quantity-display" '
+                'data-product-id="{}" '
+                'data-stock-quantity="{}" '
+                'data-reserved-externally="{}">'
+                '{}'
+                '</span>',
+                product.id,
+                total_stock,        # Общий остаток
+                reserved_externally, # Правильный резерв
+                display_available   # Доступно сейчас
+            )
+            
+        except Exception as e:
+            # Если что-то пошло не так - показываем ошибку
+            return format_html('<span style="color: red;">Ошибка: {}</span>', str(e))
+            # Настройки для колонки "Остаток"
+    available_quantity.short_description = "Остаток"
+    available_quantity.help_text = "Сколько товара можно заказать сейчас. Считается: общий остаток минус резерв в других заказах"
 
-        # Формируем HTML с метками для JavaScript (чтобы цифры обновлялись автоматически)
-        return format_html(
-            '<span class="available-quantity-display" data-product-id="{}" data-stock-quantity="{}" data-reserved-externally="{}">{}</span>',
-            product.id,
-            total_stock,
-            total_reserved_in_other_orders,
-            initial_available
-        )
-    available_quantity.short_description = "Доступно сейчас"
 
     # Функция для подсчета суммы по строке
     def display_item_total(self, obj):
@@ -254,5 +276,3 @@ class OrderServiceItemInline(admin.TabularInline):
         if parent_order and parent_order.status in (Order.STATUS_ISSUED, Order.STATUS_CANCELLED): 
             return False
         return super().has_delete_permission(request, obj)
-
-# --- КОНЕЦ ФАЙЛА ---

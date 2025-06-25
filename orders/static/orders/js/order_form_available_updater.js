@@ -1,92 +1,72 @@
-// Ждем, пока вся страница загрузится
+// Система обновления остатков - новая версия
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('[AvailableUpdater] Запуск новой системы обновления остатков');
 
-    // Эта функция будет пересчитывать доступное количество для конкретного товара
-    function updateAvailableQuantityForProduct(productId) {
-        if (!productId) {
-            return;
-        }
-
-        // Находим все строки в таблице, которые относятся к этому товару
-        const productRows = document.querySelectorAll(`.available-quantity-display[data-product-id="${productId}"]`);
-        if (productRows.length === 0) {
-            return;
-        }
-
-        // Берем данные, которые нам передал Python (они одинаковы для всех строк одного товара)
-        const stock = parseInt(productRows[0].dataset.stockQuantity, 10);
-        const reservedExternally = parseInt(productRows[0].dataset.reservedExternally, 10);
-
-        // Считаем, сколько этого товара зарезервировано ПРЯМО СЕЙЧАС на странице
-        let reservedOnThisPage = 0;
-        const quantityInputs = document.querySelectorAll(`.order-item-quantity`);
+    // Функция обновления остатков
+    function updateStockDisplays() {
+        console.log('[AvailableUpdater] Начинаем обновление остатков');
         
-        quantityInputs.forEach(input => {
-            // Находим родительскую строку, чтобы проверить, тот ли это товар
-            const row = input.closest('.dynamic-product_items');
-            if (row) {
-                const displaySpan = row.querySelector(`.available-quantity-display[data-product-id="${productId}"]`);
-                // Если это строка с нашим товаром и она не помечена на удаление, считаем ее количество
-                const deleteCheckbox = row.querySelector('input[id$="-DELETE"]');
-                if (displaySpan && (!deleteCheckbox || !deleteCheckbox.checked)) {
-                    reservedOnThisPage += parseInt(input.value, 10) || 0;
-                }
-            }
-        });
-
-        // Вычисляем новое доступное количество
-        const newAvailable = stock - reservedExternally - reservedOnThisPage;
-
-        // Обновляем цифру во всех строках для этого товара
-        productRows.forEach(span => {
-            span.textContent = newAvailable;
+        // Ищем все поля с остатками
+        const stockFields = document.querySelectorAll('.available-quantity-display');
+        console.log('[AvailableUpdater] Найдено полей остатков:', stockFields.length);
+        
+        // Обновляем каждое поле
+        stockFields.forEach((field, index) => {
+            const productId = field.dataset.productId;
+            const totalStock = parseInt(field.dataset.stockQuantity, 10) || 0;
+            const reserved = parseInt(field.dataset.reservedExternally || "0", 10) || 0;
+            const available = totalStock - reserved;
+            
+            console.log(`[AvailableUpdater] Поле ${index + 1} - Товар: ${productId}, Всего: ${totalStock}, Резерв: ${reserved}, Доступно: ${available}`);
+            
+            // Обновляем цифру на экране
+            field.textContent = available;
         });
     }
 
-    // Эта функция будет запускать пересчет, когда что-то меняется
-    function handleFormChange(event) {
-        // Проверяем, что изменение произошло в поле количества
-        if (event.target.classList.contains('order-item-quantity')) {
-            const row = event.target.closest('.dynamic-product_items');
-            if (row) {
-                const displaySpan = row.querySelector('.available-quantity-display');
-                if (displaySpan) {
-                    const productId = displaySpan.dataset.productId;
-                    updateAvailableQuantityForProduct(productId);
-                }
-            }
-        }
-    }
-    
-    // "Слушаем" все изменения на странице
-    const form = document.getElementById('order_form');
-    if (form) {
-        form.addEventListener('change', handleFormChange);
-        form.addEventListener('keyup', handleFormChange); // Для мгновенной реакции на ввод с клавиатуры
-    }
-
-    // Специальная магия для Django: слушаем, когда добавляется новая строка товара
-    document.addEventListener('formset:added', function(event) {
-        // event.target - это новая добавленная строка
-        const newRow = event.target;
-        // Навешиваем на нее наши обработчики
-        newRow.addEventListener('change', handleFormChange);
-        newRow.addEventListener('keyup', handleFormChange);
-
-        // Также нужно обновить расчет, когда меняется сам товар в новой строке
-        const productSelect = newRow.querySelector('select[id$="-product"]');
-        if(productSelect) {
-            // Используем jQuery, так как Select2 работает с ним
-            (function($) {
-                $(productSelect).on('select2:select', function(e) {
-                    // Небольшая задержка, чтобы Django успел подгрузить данные
-                    setTimeout(function() {
-                         // Обновляем все товары, так как мы не знаем, какой был выбран раньше
-                        const allProductIds = new Set([...document.querySelectorAll('.available-quantity-display')].map(s => s.dataset.productId));
-                        allProductIds.forEach(id => updateAvailableQuantityForProduct(id));
-                    }, 200);
-                });
-            })(django.jQuery);
+    // Следим за изменениями в списке товаров (основной способ)
+    document.addEventListener('change', function(event) {
+        // Проверяем - это поле выбора товара?
+        if (event.target.tagName === 'SELECT' && 
+            event.target.name && 
+            event.target.name.includes('product_items') && 
+            event.target.name.includes('-product')) {
+            
+            console.log('[AvailableUpdater] 🎯 ТОВАР ВЫБРАН!');
+            console.log('[AvailableUpdater] Имя поля:', event.target.name);
+            console.log('[AvailableUpdater] Выбранный товар ID:', event.target.value);
+            
+            // Ждем 3 секунды чтобы данные успели загрузиться с сервера
+            setTimeout(function() {
+                console.log('[AvailableUpdater] Прошло 3 секунды - обновляем остатки');
+                updateStockDisplays();
+            }, 3000);
         }
     });
+
+    // Следим за изменениями количества
+    document.addEventListener('input', function(event) {
+        if (event.target.name && event.target.name.includes('quantity')) {
+            console.log('[AvailableUpdater] Изменено количество');
+            updateStockDisplays();
+        }
+    });
+
+    // Специально для выпадающих списков Select2
+    document.addEventListener('select2:select', function(event) {
+        console.log('[AvailableUpdater] 🎯 Select2 - товар выбран');
+        
+        setTimeout(function() {
+            console.log('[AvailableUpdater] Select2 - обновляем остатки через 3 сек');
+            updateStockDisplays();
+        }, 3000);
+    });
+
+    // Обновляем остатки при загрузке страницы
+    setTimeout(function() {
+        console.log('[AvailableUpdater] Первоначальное обновление остатков');
+        updateStockDisplays();
+    }, 2000);
+
+    console.log('[AvailableUpdater] ✅ Система готова');
 });

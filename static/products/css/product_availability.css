@@ -1,0 +1,15 @@
+/* Стиль для товаров без наличия в результатах поиска */
+.select2-results__option.no-stock {
+    background-color: #FFECEC !important; /* Светло-красный фон */
+}
+
+/* Стиль при наведении на товар без наличия */
+.select2-results__option--highlighted.no-stock {
+    background-color: #FFD6D6 !important;
+    color: #333 !important;
+}
+
+/* Стиль для уже выбранного товара без наличия */
+.select2-selection__rendered .no-stock {
+    background-color: #FFECEC;
+}

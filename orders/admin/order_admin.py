@@ -24,6 +24,7 @@ from salary_management.models import EmployeeRate, SalaryCalculation, SalaryCalc
 from utils.models import DocumentTemplate
 from products.models import Product
 from cash_register.models import CashRegister, CashTransaction
+from orders.services import recalculate_all_product_reserves  # <-- добавь этот импорт
 
 
 @admin.register(Order)
@@ -608,17 +609,33 @@ class OrderAdmin(admin.ModelAdmin):
             due_date_display = order_instance.due_date.strftime('%d.%m.%Y') if order_instance.due_date else "не установлен"
             messages.info(request, f"Срок выполнения для заказа №{order_instance.id} обновлен на {due_date_display}.")
         handle_order_items_fifo_writeoff(order_instance)
+        recalculate_all_product_reserves()
+        # Отправляем SMS для нового заказа после полного сохранения
+        if not change and order_instance.pk:  # Если это новый заказ И у него есть ID
+            try:
+                from sms_service.sms_sender import send_new_order_sms
+                send_new_order_sms(order_instance)
+                print(f"[OrderAdmin SaveRelated] SMS отправлена для заказа ID: {order_instance.id}")
+            except Exception as e:
+                print(f"[OrderAdmin SaveRelated] Ошибка отправки SMS для заказа {order_instance.id}: {e}")
+        elif not change and not order_instance.pk:
+            print(f"[OrderAdmin SaveRelated] SMS НЕ отправлена - у заказа нет ID")
+        
         print(f"[OrderAdmin SaveRelated] КОНЕЦ для заказа ID: {order_instance.id}")
 
 
     class Media:
         js = (
-            'admin/js/jquery.init.js',
+            # Сначала инициализация jQuery, это критически важно
+            'admin/js/jquery.init.js', 
+            
+            # Затем все наши скрипты
             'orders/js/order_form_price_updater.js',
             'orders/js/order_fifo_updater.js',
             'orders/js/order_form_conditional_fields.js',
             'orders/js/adaptive_client_field.js',
-            'orders/js/order_form_available_updater.js', # <--- ДОБАВЬТЕ ЭТУ СТРОКУ
+            'orders/js/order_form_available_updater.js',
+            'orders/js/product_highlight.js',
         )
         css = {
             'all': ('orders/css/admin_order_form.css',)

@@ -194,28 +194,36 @@ if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
             if (!$row.length || $row.hasClass('empty-form')) return;
 
             const selectName = $selectElement.attr('name');
-            if (!selectName) return; 
-            
+            if (!selectName) return;
+
             const nameParts = selectName.split('-');
             if (nameParts.length < 2) return;
 
             const prefix = `${nameParts[0]}-${nameParts[1]}-`;
             const priceInputName = `${prefix}${priceFieldIdentifierInModel}`;
             const $priceInput = $row.find(`input[name="${priceInputName}"]`);
-            const $priceReadonlyDisplay = $row.find(`td.field-${priceFieldIdentifierInModel} p`);
-            
-            console.log(`[fetchAndUpdatePriceAndStock] Called for: ${selectName}, Selected ID: ${selectedId}, isUserInteraction: ${isUserInteraction}`);
 
-            // Важно: сбрасываем флаг ручного изменения только если это реально действие пользователя (выбор нового товара)
-            if ($priceInput.length && isUserInteraction) {
-                const oldManualPriceFlag = $priceInput.attr('data-manual-price');
-                $priceInput.removeAttr('data-manual-price');
-                console.log(`[fetchAndUpdatePriceAndStock] User interaction: Cleared data-manual-price for ${priceInputName}. Was: ${oldManualPriceFlag}`);
+            // --- ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ: УБИРАЕМ ЛИШНЕЕ УСЛОВИЕ ---
+            // Теперь проверка работает всегда: и при загрузке страницы, и при действиях пользователя.
+            // Если в поле цены УЖЕ ЕСТЬ ЧИСЛО БОЛЬШЕ НУЛЯ, НИЧЕГО НЕ ДЕЛАЕМ.
+            if ($priceInput.length && parseFloatSafely($priceInput.val()) > 0) {
+                // Мы добавляем проверку, чтобы лог был понятнее
+                if (isUserInteraction) {
+                    console.log(`[Price Updater] Обнаружена ручная цена (${$priceInput.val()}). Обновление отменено.`);
+                } else {
+                    console.log(`[Price Updater] При загрузке страницы обнаружена сохраненная цена (${$priceInput.val()}). Оставляем ее без изменений.`);
+                }
+                return; // Выходим и сохраняем ручную/сохраненную цену.
             }
+            // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
+            // Если мы дошли сюда, значит поле цены пустое или 0. Можно безопасно обновлять.
+            
+            // Находим остальные элементы для обновления
             let $stockDisplayElement = $();
             if (stockJsonKey) { $stockDisplayElement = $row.find(`td.field-get_current_stock p, div.field-get_current_stock div.readonly`); }
             const $baseCostDisplayElement = $row.find(`td.field-display_product_base_cost_price p, div.field-display_product_base_cost_price div.readonly`);
+            const $priceReadonlyDisplay = $row.find(`td.field-${priceFieldIdentifierInModel} p`);
             
             if (selectedId) {
                 const fetchUrl = `${apiUrlPrefix}${selectedId}/`;
@@ -223,58 +231,55 @@ if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
                     url: fetchUrl,
                     type: 'GET',
                     success: function(data) {
-                        let priceUpdatedViaInput = false;
+                        // Логика стала проще: мы здесь, только если цена 0. Просто обновляем все поля.
                         if ($priceInput.length && !$priceInput.is('[readonly]') && !$priceInput.is(':disabled')) {
-                            const currentManualPriceFlag = $priceInput.attr('data-manual-price'); 
-                            const isManuallySet = currentManualPriceFlag === 'true';
-                            console.log(`[fetchAndUpdatePriceAndStock] For ${priceInputName} - isManuallySet: ${isManuallySet} (Flag value: ${currentManualPriceFlag})`);
-                            if (!isManuallySet) { 
-                                if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
-                                    const priceToSet = parseFloatSafely(data[priceJsonKey]).toFixed(2); $priceInput.val(priceToSet);
-                                    console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} SET to ${priceToSet} (API)`);
-                                } else { $priceInput.val('0.00'); console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} SET to 0.00 (API, no data)`); }
-                            } else { console.log(`[fetchAndUpdatePriceAndStock] Price for ${priceInputName} was manually set. API update SKIPPED. Current value: ${$priceInput.val()}`); }
-                            priceUpdatedViaInput = true; 
-                        } 
-                        if ((!priceUpdatedViaInput || !$priceInput.length) && $priceReadonlyDisplay.length) {
                             if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
-                                const priceToSetForDisplay = parseFloatSafely(data[priceJsonKey]).toFixed(2).replace('.', ','); $priceReadonlyDisplay.text(priceToSetForDisplay);
-                            } else { $priceReadonlyDisplay.text('-'); }
-                        } else if (!priceUpdatedViaInput && !$priceInput.length && !$priceReadonlyDisplay.length) { console.warn(`[APIUpdater] Price input/readonly display for ${selectName} (name: ${priceInputName} or td.field-${priceFieldIdentifierInModel} p) NOT found in row.`); }
+                                const priceToSet = parseFloatSafely(data[priceJsonKey]).toFixed(2);
+                                $priceInput.val(priceToSet);
+                            } else {
+                                $priceInput.val('0.00');
+                            }
+                        } else if ($priceReadonlyDisplay.length) {
+                            if (data && typeof data[priceJsonKey] !== 'undefined' && data[priceJsonKey] !== null) {
+                                const priceToSetForDisplay = parseFloatSafely(data[priceJsonKey]).toFixed(2).replace('.', ',');
+                                $priceReadonlyDisplay.text(priceToSetForDisplay);
+                            } else {
+                                $priceReadonlyDisplay.text('-');
+                            }
+                        }
                         
                         if (stockJsonKey && $stockDisplayElement.length) { 
                             if (typeof data[stockJsonKey] !== 'undefined' && data[stockJsonKey] !== null) {
                                 let stockFromApi = parseInt(data[stockJsonKey], 10);
-                                let valueForText = stockFromApi; let suffixForText = stockDisplaySuffix; 
-                                let textToDisplay = isNaN(valueForText) ? 'N/A' : String(valueForText) + suffixForText; 
+                                let textToDisplay = isNaN(stockFromApi) ? 'N/A' : String(stockFromApi) + stockDisplaySuffix;
                                 $stockDisplayElement.text(textToDisplay);
-                            } else { $stockDisplayElement.text('N/A'); }
+                            } else {
+                                $stockDisplayElement.text('N/A');
+                            }
                         }
 
                         if (costPriceJsonKey && $baseCostDisplayElement.length) {
                             if (data && typeof data[costPriceJsonKey] !== 'undefined' && data[costPriceJsonKey] !== null) {
                                 $baseCostDisplayElement.text(parseFloatSafely(data[costPriceJsonKey]).toFixed(2).replace('.', ','));
-                            } else { $baseCostDisplayElement.text('---'); }
+                            } else {
+                                $baseCostDisplayElement.text('---');
+                            }
                         }
                         updateItemTotal($row);
                     },
                     error: function(xhr, status, error) {
-                        console.error('[APIUpdater] Error fetching data for URL', fetchUrl, 'Error:', error, 'Status:', status);
-                        if ($priceInput.length) {
-                            const currentManualPriceFlag = $priceInput.attr('data-manual-price');
-                            const isManuallySet = currentManualPriceFlag === 'true';
-                            if (!isManuallySet) { $priceInput.val('0.00'); }
-                        } else if ($priceReadonlyDisplay.length) { $priceReadonlyDisplay.text('-'); }
+                        console.error(`[APIUpdater] Ошибка загрузки данных для ${fetchUrl}: ${error}`);
+                        if ($priceInput.length) { $priceInput.val('0.00'); }
+                        if ($priceReadonlyDisplay.length) { $priceReadonlyDisplay.text('-'); }
                         if (stockJsonKey && $stockDisplayElement.length) $stockDisplayElement.text('Ошибка'); 
                         if (costPriceJsonKey && $baseCostDisplayElement.length) $baseCostDisplayElement.text('Ошибка');
                         updateItemTotal($row);
                     }
                 });
             } else { 
-                if ($priceInput.length) {
-                    const currentManualPriceFlag = $priceInput.attr('data-manual-price'); const isManuallySet = currentManualPriceFlag === 'true';
-                    if (isUserInteraction || !isManuallySet) { $priceInput.val('0.00'); }
-                } else if ($priceReadonlyDisplay.length) { $priceReadonlyDisplay.text('-'); }
+                // Если товар сбросили (выбрали "---"), обнуляем цену и прочие поля
+                if ($priceInput.length) { $priceInput.val('0.00'); }
+                if ($priceReadonlyDisplay.length) { $priceReadonlyDisplay.text('-'); }
                 if (stockJsonKey && $stockDisplayElement.length) $stockDisplayElement.text(''); 
                 if (costPriceJsonKey && $baseCostDisplayElement.length) $baseCostDisplayElement.text('---');
                 updateItemTotal($row);
@@ -283,11 +288,16 @@ if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
 
         // При выборе товара пользователем: считаем это ручным действием (isUserInteraction = true только после полной инициализации)
         $(document).on('change', '#product_items-group select[name$="-product"], #service_items-group select[name$="-service"]', function() {
-            const considerAsUserInteraction = pageFullyInitialized;
+            // Старая строка: const considerAsUserInteraction = pageFullyInitialized;
+            // Новая логика: Если сработал этот обработчик, это ВСЕГДА действие пользователя.
+            const considerAsUserInteraction = true;
+            
+            console.log('[PriceUpdater] 🔍 ТОВАР ВЫБРАН! Считаем это действием пользователя (isUserInteraction = true).');
+            
             if ($(this).attr('name').includes('-product')) {
-                fetchAndUpdatePriceAndStock(this, 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price', considerAsUserInteraction); 
+                fetchAndUpdatePriceAndStock(this, 'price_at_order', '/products-api/get-price/', 'retail_price', 'stock_quantity', 'cost_price', considerAsUserInteraction);
             } else if ($(this).attr('name').includes('-service')) {
-                fetchAndUpdatePriceAndStock(this, 'price_at_order', '/orders-api/get-service-price/', 'price', null, null, considerAsUserInteraction); 
+                fetchAndUpdatePriceAndStock(this, 'price_at_order', '/orders-api/get-service-price/', 'price', null, null, considerAsUserInteraction);
             }
         });
         
@@ -348,7 +358,7 @@ if (orderStatus && disabledStatuses.indexOf(orderStatus) !== -1) {
             updateOrderTotal(); determineOrderTypeViaAPI(); 
             pageFullyInitialized = true; 
             console.log('[PriceUpdater] Page fully initialized.');
-        }, 500); 
+        }, 100); 
 
         console.log('[PriceUpdater] Initialized event handlers and started initial processing.');
     } else { console.warn('[PriceUpdater] Django jQuery not available.'); }

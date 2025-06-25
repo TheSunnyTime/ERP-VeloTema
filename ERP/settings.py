@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'uiconfig.apps.UiconfigConfig',   # <-- ДОБАВЛЕНО НАШЕ НОВОЕ ПРИЛОЖЕНИЕ
     'tasks.apps.TasksConfig', # или просто 'tasks'
     'grafik.apps.GrafikConfig', # ИЗМЕНИТЬ ЗДЕСЬ
+    'sms_service',  # <- ДОБАВЬ ЭТУ СТРОКУ
 ]
 
 MIDDLEWARE = [

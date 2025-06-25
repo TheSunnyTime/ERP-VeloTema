@@ -9,6 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from products.models import Product
 from clients.models import Client
 from cash_register.models import CashRegister # CashTransaction не используется напрямую
+from sms_service.sms_sender import send_new_order_sms
 
 # НОВАЯ МОДЕЛЬ
 class ServiceCategory(models.Model):
@@ -247,6 +248,7 @@ class Order(models.Model):
         # self.determine_and_set_order_type() # Потенциально здесь, но см. комментарий
         super().save(*args, **kwargs)
         self._previous_status = self.status
+            
 
 
 class OrderProductItem(models.Model):
@@ -271,10 +273,17 @@ class OrderProductItem(models.Model):
             return (price * qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return Decimal('0.00')
     def save(self, *args, **kwargs):
-        if self.pk is None or self.price_at_order is None or self.price_at_order == Decimal('0.00'):
-            if self.product: self.price_at_order = self.product.retail_price
-        super().save(*args, **kwargs)
+        # Устанавливаем цену из карточки товара, ТОЛЬКО ЕСЛИ она не была задана вручную в форме
+        # (т.е. если она осталась пустой или равной нулю).
+        if self.price_at_order is None or self.price_at_order == Decimal('0.00'):
+            if self.product:
+                self.price_at_order = self.product.retail_price
+        
+        # Если по какой-то причине цена все еще не установлена, ставим 0
+        if self.price_at_order is None:
+            self.price_at_order = Decimal('0.00')
 
+        super().save(*args, **kwargs)
 class OrderServiceItem(models.Model):
     order = models.ForeignKey(Order, related_name='service_items', on_delete=models.CASCADE, verbose_name="Заказ")
     service = models.ForeignKey(Service, related_name='order_service_items', on_delete=models.PROTECT, verbose_name="Услуга")
@@ -294,6 +303,12 @@ class OrderServiceItem(models.Model):
             return (price * qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return Decimal('0.00')
     def save(self, *args, **kwargs):
-        if self.pk is None or self.price_at_order is None or self.price_at_order == Decimal('0.00'):
-            if self.service: self.price_at_order = self.service.price
+        # Та же самая логика, что и для товаров
+        if self.price_at_order is None or self.price_at_order == Decimal('0.00'):
+            if self.service:
+                self.price_at_order = self.service.price
+        
+        if self.price_at_order is None:
+            self.price_at_order = Decimal('0.00')
+
         super().save(*args, **kwargs)

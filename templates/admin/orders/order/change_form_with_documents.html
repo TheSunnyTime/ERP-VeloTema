@@ -27,33 +27,120 @@
     {% endif %}
 {% endblock %}
 
-{# --- ДОБАВЛЯЕМ СЮДА --- #}
+{# ИСПРАВЛЕННЫЙ КОД ДЛЯ ПОЛЯ "ДОСТУПНО СЕЙЧАС" #}
 {% block inline_field_sets %}
     {{ block.super }}
     <script>
-        // Для визуального выделения столбца (по желанию)
         document.addEventListener('DOMContentLoaded', function() {
-            let headers = document.querySelectorAll('th');
+            console.log('[ИСПРАВЛЕНИЕ] Создаем поле "Доступно сейчас"...');
+            
+            // Шаг 1: Добавляем заголовок столбца "Доступно сейчас"
+            let headers = document.querySelectorAll('#product_items-group th');
+            let stockHeader = null;
+            
             headers.forEach(function(th) {
                 if (th.textContent.trim() === 'На складе (тек.)') {
-                    let newTh = th.cloneNode(true);
-                    newTh.textContent = 'Доступно сейчас';
-                    th.after(newTh);
+                    stockHeader = th;
+                    console.log('[ИСПРАВЛЕНИЕ] Нашли заголовок "На складе (тек.)"');
                 }
             });
-            let rows = document.querySelectorAll('tbody tr');
-            rows.forEach(function(tr) {
-                let stockTd = tr.querySelector('td.field-get_current_stock');
-                if (stockTd) {
-                    // Берём доступно из скрытого поля, если Django вывел как readonly_field
-                    let availableTd = stockTd.cloneNode(true);
-                    let availableVal = tr.querySelector('td.field-available_quantity');
-                    if (availableVal) {
-                        availableTd.innerHTML = availableVal.innerHTML;
-                    } else {
-                        availableTd.innerHTML = '—';
+            
+            if (stockHeader) {
+                // Создаем новый заголовок
+                let newHeader = document.createElement('th');
+                newHeader.textContent = 'Доступно сейчас';
+                newHeader.style.backgroundColor = '#f0f8ff'; // Светло-голубой фон для выделения
+                stockHeader.after(newHeader);
+                console.log('[ИСПРАВЛЕНИЕ] Добавили заголовок "Доступно сейчас"');
+            }
+            
+            // Шаг 2: Добавляем ячейки "Доступно сейчас" для каждой строки товара
+            let rows = document.querySelectorAll('#product_items-group tbody tr.dynamic-product_items');
+            console.log('[ИСПРАВЛЕНИЕ] Найдено строк товаров:', rows.length);
+            
+            rows.forEach(function(tr, index) {
+                // Ищем ячейку "На складе (тек.)"
+                let stockCell = tr.querySelector('td.field-get_current_stock');
+                
+                if (stockCell) {
+                    console.log(`[ИСПРАВЛЕНИЕ] Обрабатываем строку ${index + 1}`);
+                    
+                    // Получаем ID товара из поля select
+                    let productSelect = tr.querySelector('select[name$="-product"]');
+                    let productId = productSelect ? productSelect.value : null;
+                    
+                    // Получаем количество на складе из текста ячейки
+                    let stockText = stockCell.textContent.trim();
+                    let stockQuantity = 0;
+                    
+                    // Парсим число из текста (может быть "56 шт." или просто "56")
+                    let stockMatch = stockText.match(/(\d+)/);
+                    if (stockMatch) {
+                        stockQuantity = parseInt(stockMatch[1], 10);
                     }
-                    stockTd.after(availableTd);
+                    
+                    console.log(`[ИСПРАВЛЕНИЕ] Строка ${index + 1}: товар ID=${productId}, остаток=${stockQuantity}`);
+                    
+                    // Создаем новую ячейку "Доступно сейчас"
+                    let availableCell = document.createElement('td');
+                    availableCell.style.backgroundColor = '#f0f8ff'; // Тот же цвет что и заголовок
+                    availableCell.style.textAlign = 'center';
+                    availableCell.style.fontWeight = 'bold';
+                    
+                    if (productId && stockQuantity > 0) {
+                        // Создаем элемент span с правильными данными для JavaScript
+                        let availableSpan = document.createElement('span');
+                        availableSpan.className = 'available-quantity-display';
+                        availableSpan.setAttribute('data-product-id', productId);
+                        availableSpan.setAttribute('data-stock-quantity', stockQuantity);
+                        availableSpan.setAttribute('data-reserved-externally', 0); // Пока ставим 0, потом можно улучшить
+                        availableSpan.textContent = stockQuantity; // Показываем изначально весь остаток
+                        
+                        availableCell.appendChild(availableSpan);
+                        console.log(`[ИСПРАВЛЕНИЕ] Создали span для товара ${productId} с остатком ${stockQuantity}`);
+                    } else {
+                        // Если товар не выбран или остаток 0
+                        availableCell.innerHTML = '<span class="available-quantity-display">—</span>';
+                        console.log(`[ИСПРАВЛЕНИЕ] Строка ${index + 1}: товар не выбран или остаток 0`);
+                    }
+                    
+                    // Вставляем новую ячейку после ячейки "На складе (тек.)"
+                    stockCell.after(availableCell);
+                }
+            });
+            
+            console.log('[ИСПРАВЛЕНИЕ] Поле "Доступно сейчас" создано!');
+            
+            // Шаг 3: Обновляем поле когда меняется выбранный товар
+            document.addEventListener('change', function(event) {
+                if (event.target.name && event.target.name.includes('-product')) {
+                    console.log('[ИСПРАВЛЕНИЕ] Изменился выбор товара, обновляем поле...');
+                    
+                    // Находим строку где изменился товар
+                    let row = event.target.closest('tr.dynamic-product_items');
+                    if (row) {
+                        let stockCell = row.querySelector('td.field-get_current_stock');
+                        let availableSpan = row.querySelector('.available-quantity-display');
+                        
+                        if (stockCell && availableSpan) {
+                            let productId = event.target.value;
+                            let stockText = stockCell.textContent.trim();
+                            let stockMatch = stockText.match(/(\d+)/);
+                            let stockQuantity = stockMatch ? parseInt(stockMatch[1], 10) : 0;
+                            
+                            if (productId && stockQuantity > 0) {
+                                availableSpan.setAttribute('data-product-id', productId);
+                                availableSpan.setAttribute('data-stock-quantity', stockQuantity);
+                                availableSpan.textContent = stockQuantity;
+                                console.log(`[ИСПРАВЛЕНИЕ] Обновили данные: товар ${productId}, остаток ${stockQuantity}`);
+                            } else {
+                                availableSpan.textContent = '—';
+                                availableSpan.removeAttribute('data-product-id');
+                                availableSpan.removeAttribute('data-stock-quantity');
+                                console.log('[ИСПРАВЛЕНИЕ] Очистили поле - товар не выбран');
+                            }
+                        }
+                    }
                 }
             });
         });
