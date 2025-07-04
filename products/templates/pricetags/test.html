@@ -1,0 +1,304 @@
+{# products/pricetags/templates/pricetags/select_products_for_pricetags.html #}
+{% extends 'admin/base_site.html' %}
+{% load static i18n admin_urls %}
+
+{% block title %}Выбор товаров для ценников | {{ site_title }}{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static "admin/css/changelists.css" %}">
+    <style>
+        /* УБИРАЕМ ВСЕ ОГРАНИЧЕНИЯ ШИРИНЫ ДЛЯ МОДУЛЕЙ, ТАБЛИЦ И ACTION-BAR */
+        .module {
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+            padding: 20px;
+            /* УДАЛЕНО: max-width */
+            /* УДАЛЕНО: margin-left, margin-right */
+        }
+        .search-form-row { 
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .search-form-row .select2-container {
+            width: 100% !important; /* Делаем поле поиска максимально широким */
+            /* УДАЛЕНО: max-width */
+        }
+        .results-container {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            width: 100%; /* Таблица занимает всю ширину */
+            /* УДАЛЕНО: max-width */
+        }
+        #product-results-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #product-results-table th, #product-results-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+        }
+        #product-results-table th {
+            background-color: #f5f5f5;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        #product-results-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        #product-results-table tr:hover {
+            background-color: #e0f2f7;
+        }
+        .action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            width: 100%; /* Строка выбранных товаров занимает всю ширину */
+            /* УДАЛЕНО: max-width */
+            box-sizing: border-box;
+        }
+        .button.default {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .button.default:hover {
+            background: #0056b3;
+        }
+        .button.default:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+    {{ form.media }}
+{% endblock %}
+
+{% block bodyclass %}{{ block.super }} app-products model-product change-list{% endblock %}
+
+{% if not is_popup %}
+{% block breadcrumbs %}
+    <div class="breadcrumbs">
+        <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+        &rsaquo; <a href="{% url 'admin:app_list' app_label='products' %}">{% translate 'Products' %}</a>
+        &rsaquo; <a href="{% url 'admin:products_product_changelist' %}">{% translate 'Products' %}</a>
+        &rsaquo; Выбор товаров для ценников
+    </div>
+{% endblock %}
+{% endif %}
+
+{# БЛОК BRANDING И NAV-GLOBAL не переопределяем, берем из base_site.html #}
+
+{% block content %}
+    {# Используем block.super, чтобы сохранить базовую структуру content, которая включает сайдбар #}
+    {{ block.super }} 
+
+    {# Этот div - это наша основная контентная область, куда мы помещаем наш UI #}
+    {# Мы НЕ создаем здесь content-main или content-related, так как они должны быть в родительском шаблоне #}
+    {# Вместо этого, мы ищем блок, который родительский шаблон использует для основного контента #}
+    {# Обычно это блок 'main' или 'content' #}
+    
+    {# Если block.super в content не сработает, то нужно будет определить наш контент в block main #}
+    {# block main находится внутри block content в admin/base.html #}
+    
+    {# Перемещаем наш UI в блок main, который должен быть внутри block content #}
+    {% block main %}
+        <div id="content-main"> {# Этот ID нужен для CSS админки #}
+            <h1>Выбор товаров для печати ценников</h1>
+            <p>Используйте поиск, чтобы найти товары, и отметьте их галочками для печати.</p>
+
+            <div class="module">
+                <h2>Поиск товаров</h2>
+                <div class="search-form-row">
+                    {{ form.product }}
+                    <div id="search-spinner" style="display: none;">Загрузка...</div>
+                </div>
+
+                <div class="results-container">
+                    <table id="product-results-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="select-all-products"></th>
+                                <th>Наименование</th>
+                                <th>Артикул</th>
+                                <th>Цена (BYN)</th>
+                                <th>Доступно</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr id="no-results-row" style="display: none;">
+                                <td colspan="5" style="text-align: center;">Ничего не найдено.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="action-bar">
+                    <p>Выбрано товаров: <span id="selected-products-count">0</span></p>
+                    <button type="button" id="generate-pricetags-btn" class="button default">Сгенерировать ценники</button>
+                </div>
+            </div>
+        </div>
+    {% endblock %} {# Закрываем block main #}
+
+    <script type="text/javascript">
+        (function($) {
+            const selectedProductIds = new Set();
+            const selectedProductsCountSpan = $('#selected-products-count');
+            const generatePricetagsBtn = $('#generate-pricetags-btn');
+            const productTableBody = $('#product-results-table tbody');
+            const selectAllCheckbox = $('#select-all-products');
+            const noResultsRow = $('#no-results-row');
+
+            const getProductDataUrl = "{% url 'products:pricetags:get_product_data_api' 0 %}"; 
+            let csrfToken = null;
+            const csrfCookieMatch = document.cookie.match(/csrftoken=([^;]+)/);
+            if (csrfCookieMatch) {
+                csrfToken = csrfCookieMatch[1];
+            } else {
+                const csrfMetaTag = document.querySelector('meta[name="csrf-token"]');
+                if (csrfMetaTag) {
+                    csrfToken = csrfMetaTag.getAttribute('content');
+                }
+            }
+            if (!csrfToken) {
+                console.warn("CSRF token not found. This might cause issues.");
+            }
+
+            function updateSelectedCount() {
+                selectedProductsCountSpan.text(selectedProductIds.size);
+                generatePricetagsBtn.prop('disabled', selectedProductIds.size === 0);
+            }
+
+            function addProductToTable(product) {
+                const existingRow = productTableBody.find(`tr[data-product-id="${product.id}"]`);
+                if (existingRow.length > 0) {
+                    alert(`Товар "${product.name}" уже добавлен в список.`);
+                    return; 
+                }
+                
+                if (!product.name || product.retail_price === undefined || product.available_stock_quantity === undefined) {
+                    console.error('Ошибка: неполные данные товара для добавления в таблицу:', product);
+                    alert('Ошибка: Не удалось получить полные данные товара. Проверьте консоль.');
+                    return;
+                }
+
+                const retailPrice = parseFloat(product.retail_price || '0.00').toFixed(2);
+                const availableQuantity = product.available_stock_quantity || 0;
+
+                const row = $(`<tr data-product-id="${product.id}">
+                    <td><input type="checkbox" class="product-select-checkbox" value="${product.id}" checked></td>
+                    <td>${product.name}</td>
+                    <td>${product.sku || ''}</td>
+                    <td>${retailPrice}</td>
+                    <td>${availableQuantity}</td>
+                </tr>`);
+                
+                row.find('.product-select-checkbox').on('change', function() {
+                    if (this.checked) {
+                        selectedProductIds.add(parseInt(this.value));
+                    } else {
+                        selectedProductIds.delete(parseInt(this.value));
+                        selectAllCheckbox.prop('checked', false);
+                    }
+                    updateSelectedCount();
+                });
+                productTableBody.append(row);
+                selectedProductIds.add(product.id);
+                updateSelectedCount();
+                noResultsRow.hide();
+            }
+
+            $(document).ready(function() {
+                const searchInput = $('#id_product');
+                
+                searchInput.on('select2:select', function (e) {
+                    const selectedProductId = e.params.data.id;
+                    console.log('Выбран ID товара (Select2):', selectedProductId);
+
+                    const url = getProductDataUrl.replace('0', selectedProductId);
+                    
+                    $.ajax({
+                        url: url,
+                        method: 'GET',
+                        dataType: 'json',
+                        success: function(productData) {
+                            console.log('Получены полные данные товара:', productData);
+                            addProductToTable(productData);
+                        },
+                        error: function(xhr, status, error) {
+                            console.error('Ошибка при получении полных данных товара:', error, xhr.responseText);
+                            alert('Ошибка при получении данных товара. Проверьте консоль.');
+                        }
+                    });
+
+                    searchInput.val(null).trigger('change');
+                });
+
+                selectAllCheckbox.on('change', function() {
+                    const checkboxes = productTableBody.find('.product-select-checkbox');
+                    checkboxes.prop('checked', this.checked);
+                    checkboxes.each(function() {
+                        if (this.checked) {
+                            selectedProductIds.add(parseInt(this.value));
+                        } else {
+                            selectedProductIds.delete(parseInt(this.value));
+                        }
+                    });
+                    updateSelectedCount();
+                });
+
+                generatePricetagsBtn.on('click', function() {
+                    if (selectedProductIds.size === 0) {
+                        alert('Пожалуйста, выберите хотя бы один товар для печати ценников.');
+                        return;
+                    }
+
+                    console.log('Выбраны товары с ID:', Array.from(selectedProductIds));
+
+                    const form = $('<form>', {
+                        method: 'POST',
+                        action: "{% url 'products:pricetags:generate_pdf' %}",
+                        target: "_blank"
+                    });
+
+                    $('<input>', {
+                        type: 'hidden',
+                        name: 'csrfmiddlewaretoken',
+                        value: csrfToken
+                    }).appendTo(form);
+
+                    $('<input>', {
+                        type: 'hidden',
+                        name: 'product_ids',
+                        value: JSON.stringify(Array.from(selectedProductIds))
+                    }).appendTo(form);
+
+                    form.appendTo('body').submit();
+                    form.remove();
+                });
+
+                updateSelectedCount(); 
+            });
+        })(jQuery);
+    </script>
+{% endblock %}

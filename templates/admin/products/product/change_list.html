@@ -1,29 +1,33 @@
-{% extends "admin/base_site.html" %}
+{# ERP/templates/admin/products/product/change_list.html #}
+{% extends "admin/base.html" %} {# ИЗМЕНЕНО: теперь наследуется от admin/base.html #}
 {% load i18n admin_urls static admin_list %}
 
-{% block title %}{% if cl.formset and cl.formset.errors %}{% translate "Error:" %} {% endif %}{{ block.super }}{% endblock %}
+{% block title %}{% if cl.formset and cl.formset.errors %}{% translate "Error:" %} {% endif %}{{ cl.opts.verbose_name_plural|capfirst }} | {{ site_title|default:_('Django site admin') }}{% endblock %} {# Обновлен title #}
+
 {% block extrastyle %}
-  {{ block.super }}
-  <link rel="stylesheet" href="{% static "admin/css/changelists.css" %}">
-  {% if cl.formset %}
-    <link rel="stylesheet" href="{% static "admin/css/forms.css" %}">
-  {% endif %}
-  {% if cl.formset or action_form %}
-    <script src="{% url 'admin:jsi18n' %}"></script>
-  {% endif %}
-  {{ media.css }}
-  {% if not actions_on_top and not actions_on_bottom %}
-    <style>
-      #changelist table thead th:first-child {width: inherit}
-    </style>
-  {% endif %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static "admin/css/changelists.css" %}">
+    {% if cl.formset %}
+        <link rel="stylesheet" href="{% static "admin/css/forms.css" %}">
+    {% endif %}
+    {% if cl.formset or action_form %}
+        <script src="{% url 'admin:jsi18n' %}"></script>
+    {% endif %}
+    {{ media.css }}
+    {% if not actions_on_top and not actions_on_bottom %}
+        <style>
+            #changelist table thead th:first-child {width: inherit}
+        </style>
+    {% endif %}
+    {# --- FAVICONS ИЗ ТВОЕГО base_site.html --- #}
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static '32x32.png' %}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static '180x180.png' %}">
 {% endblock %}
 
-{% block extrahead %}
-{{ block.super }}
-{{ media.js }}
-<script src="{% static 'admin/js/filters.js' %}" defer></script>
-<!-- Наши файлы для подсветки товаров без наличия -->
+{% block extrahead %} {# Переопределяем extrahead, чтобы включить jQuery и media.js #}
+    {{ block.super }}
+    {{ media.js }}
+    <script src="{% static 'admin/js/filters.js' %}" defer></script>
 {% endblock %}
 
 {% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} change-list{% endblock %}
@@ -40,67 +44,80 @@
 
 {% block coltype %}{% endblock %}
 
+{# --- БЛОК BRANDING ИЗ ТВОЕГО base_site.html --- #}
+{% block branding %}
+    <div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a></div>
+    {% include "admin/color_theme_toggle.html" %}
+{% endblock %}
+
+{# --- БЛОК NAV-GLOBAL ИЗ ТВОЕГО base_site.html (если он там есть) --- #}
+{% block nav-global %}{% endblock %} {# Обычно пустой, но если у тебя там что-то было, вставь #}
+
+{# Основной блок контента, куда вставляется содержимое из Django Admin #}
 {% block content %}
-  <div id="content-main">
-    {% block object-tools %}
-        <ul class="object-tools">
-          {% block object-tools-items %}
-            {# Стандартные инструменты объекта, например, кнопка "Добавить" #}
-            {% change_list_object_tools %}
+    <div id="content-main">
+        {% block object-tools %}
+            <ul class="object-tools">
+                {% block object-tools-items %}
+                    {% change_list_object_tools %}
 
-            {# ----- НАЧАЛО НАШЕЙ КАСТОМНОЙ КНОПКИ ----- #}
-            {% if request.user.is_superuser %} {# Показываем кнопку только суперпользователю #}
-                <li>
-                    {# Используем имя URL, которое мы задали в ProductAdmin.get_urls #}
-                    {% url 'admin:products_product_reset_all_stock' as reset_stock_url %}
-                    <a href="{{ reset_stock_url }}" class="button">Обнулить все остатки</a>
-                </li>
-            {% endif %}
-            {# ----- КОНЕЦ НАШЕЙ КАСТОМНОЙ КНОПКИ ----- #}
-          {% endblock %}
-        </ul>
-    {% endblock %}
-    {% if cl.formset and cl.formset.errors %}
-        <p class="errornote">
-        {% blocktranslate count counter=cl.formset.total_error_count %}Please correct the error below.{% plural %}Please correct the errors below.{% endblocktranslate %}
-        </p>
-        {{ cl.formset.non_form_errors }}
-    {% endif %}
-    <div class="module{% if cl.has_filters %} filtered{% endif %}" id="changelist">
-      <div class="changelist-form-container">
-        {% block search %}{% search_form cl %}{% endblock %}
-        {% block date_hierarchy %}{% if cl.date_hierarchy %}{% date_hierarchy cl %}{% endif %}{% endblock %}
+                    {% if request.user.is_superuser %}
+                        <li>
+                            {% url 'admin:products_product_reset_all_stock' as reset_stock_url %}
+                            <a href="{{ reset_stock_url }}" class="button">Обнулить все остатки</a>
+                        </li>
+                    {% endif %}
 
-        <form id="changelist-form" method="post"{% if cl.formset and cl.formset.is_multipart %} enctype="multipart/form-data"{% endif %} novalidate>{% csrf_token %}
-        {% if cl.formset %}
-          <div>{{ cl.formset.management_form }}</div>
-        {% endif %}
-
-        {% block result_list %}
-          {% if action_form and actions_on_top and cl.show_admin_actions %}{% admin_actions %}{% endif %}
-          {% result_list cl %}
-          {% if action_form and actions_on_bottom and cl.show_admin_actions %}{% admin_actions %}{% endif %}
+                    {% if request.user.is_staff %}
+                        <li>
+                            <a href="{{ pricetags_selection_url }}" class="addlink">Печать ценников</a>
+                        </li>
+                    {% endif %}
+                {% endblock %}
+            </ul>
         {% endblock %}
-        {% block pagination %}{% pagination cl %}{% endblock %}
-        </form>
-      </div>
-      {% block filters %}
-        {% if cl.has_filters %}
-          <nav id="changelist-filter" aria-labelledby="changelist-filter-header">
-            <h2 id="changelist-filter-header">{% translate 'Filter' %}</h2>
-            {% if cl.is_facets_optional or cl.has_active_filters %}<div id="changelist-filter-extra-actions">
-              {% if cl.is_facets_optional %}<h3>
-                {% if cl.add_facets %}<a href="{{ cl.remove_facet_link }}" class="hidelink">{% translate "Hide counts" %}</a>
-                {% else %}<a href="{{ cl.add_facet_link }}" class="viewlink">{% translate "Show counts" %}</a>{% endif %}
-              </h3>{% endif %}
-              {% if cl.has_active_filters %}<h3>
-                <a href="{{ cl.clear_all_filters_qs }}">&#10006; {% translate "Clear all filters" %}</a>
-              </h3>{% endif %}
-            </div>{% endif %}
-            {% for spec in cl.filter_specs %}{% admin_list_filter cl spec %}{% endfor %}
-          </nav>
+        {# Здесь будет остальной контент списка - поиск, таблица и т.д. #}
+        {% if cl.formset and cl.formset.errors %}
+            <p class="errornote">
+            {% blocktranslate count counter=cl.formset.total_error_count %}Please correct the error below.{% plural %}Please correct the errors below.{% endblocktranslate %}
+            </p>
+            {{ cl.formset.non_form_errors }}
         {% endif %}
-      {% endblock %}
+        <div class="module{% if cl.has_filters %} filtered{% endif %}" id="changelist">
+            <div class="changelist-form-container">
+                {% block search %}{% search_form cl %}{% endblock %}
+                {% block date_hierarchy %}{% if cl.date_hierarchy %}{% date_hierarchy cl %}{% endif %}{% endblock %}
+
+                <form id="changelist-form" method="post"{% if cl.formset and cl.formset.is_multipart %} enctype="multipart/form-data"{% endif %} novalidate>{% csrf_token %}
+                {% if cl.formset %}
+                    <div>{{ cl.formset.management_form }}</div>
+                {% endif %}
+
+                {% block result_list %}
+                    {% if action_form and actions_on_top and cl.show_admin_actions %}{% admin_actions %}{% endif %}
+                    {% result_list cl %}
+                    {% if action_form and actions_on_bottom and cl.show_admin_actions %}{% admin_actions %}{% endif %}
+                {% endblock %}
+                {% block pagination %}{% pagination cl %}{% endblock %}
+                </form>
+            </div>
+            {% block filters %}
+                {% if cl.has_filters %}
+                    <nav id="changelist-filter" aria-labelledby="changelist-filter-header">
+                        <h2 id="changelist-filter-header">{% translate 'Filter' %}</h2>
+                        {% if cl.is_facets_optional or cl.has_active_filters %}<div id="changelist-filter-extra-actions">
+                            {% if cl.is_facets_optional %}<h3>
+                                {% if cl.add_facets %}<a href="{{ cl.remove_facet_link }}" class="hidelink">{% translate "Hide counts" %}</a>
+                                {% else %}<a href="{{ cl.add_facet_link }}" class="viewlink">{% translate "Show counts" %}</a>{% endif %}
+                            </h3>{% endif %}
+                            {% if cl.has_active_filters %}<h3>
+                                <a href="{{ cl.clear_all_filters_qs }}">&#10006; {% translate "Clear all filters" %}</a>
+                            </h3>{% endif %}
+                        </div>{% endif %}
+                        {% for spec in cl.filter_specs %}{% admin_list_filter cl spec %}{% endfor %}
+                    </nav>
+                {% endif %}
+            {% endblock %}
+        </div>
     </div>
-  </div>
 {% endblock %}

@@ -1,7 +1,7 @@
-# products/admin.py
+# products/admin.py (ОБНОВЛЁН)
 from django.contrib import admin, messages
 from django.urls import path, reverse
-from django.shortcuts import render
+from django.shortcuts import render, redirect # Добавляем redirect
 from django.http import HttpResponseRedirect
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
@@ -10,9 +10,8 @@ from django.db.models import Q
 
 from .models import Category, Product
 from suppliers.models import SupplyItem, Supply
-from orders.models import OrderProductItem, Order # Order уже импортирован
-# Импортируем OrderStatusColor
-from uiconfig.models import SupplyStatusColor, OrderStatusColor # <--- ДОБАВЛЕН OrderStatusColor
+from orders.models import OrderProductItem, Order
+from uiconfig.models import SupplyStatusColor, OrderStatusColor
 from .search_utils import get_product_search_queryset
 
 @admin.register(Category)
@@ -30,7 +29,7 @@ class SupplyItemInlineForProduct(admin.TabularInline):
     _supply_status_colors_map = None
 
     @classmethod
-    def _initialize_status_colors(cls): # Переименуем для ясности, что это для Supply
+    def _initialize_status_colors(cls):
         if cls._supply_status_colors_map is None:
             try:
                 cls._supply_status_colors_map = {
@@ -90,7 +89,7 @@ class SupplyItemInlineForProduct(admin.TabularInline):
 
 class OrderProductItemInlineForProduct(admin.TabularInline):
     model = OrderProductItem
-    autocomplete_fields = ['product']  # Эта строка включает автодополнение товаров
+    autocomplete_fields = ['product']
     fk_name = 'product'
     extra = 0
     can_delete = False
@@ -115,22 +114,19 @@ class OrderProductItemInlineForProduct(admin.TabularInline):
         super().__init__(parent_model, admin_site)
         self.__class__._initialize_order_status_colors() 
 
-    # --- Изменения здесь ---
     def display_order_number_link(self, obj: OrderProductItem):
         if obj.order:
             link = reverse("admin:orders_order_change", args=[obj.order.id])
-            # Попробуем вернуть только номер заказа как ссылку
             return format_html('<a href="{}">Заказ №{}</a>', link, obj.order.id)
         return "N/A"
-    display_order_number_link.short_description = "Заказ №" # Короткое название для колонки
+    display_order_number_link.short_description = "Заказ №"
 
-    def display_order_client_and_date(self, obj: OrderProductItem): # Отдельное поле для клиента и даты
+    def display_order_client_and_date(self, obj: OrderProductItem):
         if obj.order:
             client_name = obj.order.client.get_full_name_or_company() if obj.order.client else "Клиент не указан"
             return f"{client_name} ({obj.order.created_at.strftime('%d.%m.%Y')})"
         return "N/A"
     display_order_client_and_date.short_description = "Клиент (Дата)"
-    # --- Конец изменений ---
 
     def colored_order_status(self, obj: OrderProductItem):
         if not obj.order:
@@ -160,9 +156,8 @@ class OrderProductItemInlineForProduct(admin.TabularInline):
         return obj.cost_price_at_sale
     item_cost_price_at_sale.short_description = "Себестоимость списания"
     
-    # Обновляем fields и readonly_fields
     list_display_fields = (
-        'display_order_number_link',      # Ссылка на номер заказа
+        'display_order_number_link',
         'colored_order_status',
         'quantity', 
         'price_at_order', 
@@ -173,11 +168,12 @@ class OrderProductItemInlineForProduct(admin.TabularInline):
     readonly_fields = list_display_fields
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('order', 'order__client').filter(order__status=Order.STATUS_ISSUED) # Добавил select_related
+        return super().get_queryset(request).select_related('order', 'order__client').filter(order__status=Order.STATUS_ISSUED)
 
     def has_add_permission(self, request, obj=None): return False
     def has_change_permission(self, request, obj=None): return False
     def has_delete_permission(self, request, obj=None): return False
+
 
 class OrderProductItemReservationInlineForProduct(admin.TabularInline):
     model = OrderProductItem
@@ -205,7 +201,6 @@ class OrderProductItemReservationInlineForProduct(admin.TabularInline):
         super().__init__(parent_model, admin_site)
         self.__class__._initialize_order_status_colors() 
 
-    # Ссылка на заказ с номером
     def display_reservation_order_link(self, obj: OrderProductItem):
         if obj.order:
             link = reverse("admin:orders_order_change", args=[obj.order.id])
@@ -213,7 +208,6 @@ class OrderProductItemReservationInlineForProduct(admin.TabularInline):
         return "N/A"
     display_reservation_order_link.short_description = "Заказ №"
 
-    # Информация о клиенте и дате заказа
     def display_reservation_client_and_date(self, obj: OrderProductItem):
         if obj.order:
             client_name = obj.order.client.get_full_name_or_company() if obj.order.client else "Клиент не указан"
@@ -221,7 +215,6 @@ class OrderProductItemReservationInlineForProduct(admin.TabularInline):
         return "N/A"
     display_reservation_client_and_date.short_description = "Клиент (Дата заказа)"
 
-    # Цветной статус заказа (точно такой же как в продажах)
     def colored_reservation_status(self, obj: OrderProductItem):
         if not obj.order:
             return "N/A"
@@ -246,33 +239,29 @@ class OrderProductItemReservationInlineForProduct(admin.TabularInline):
         return status_display
     colored_reservation_status.short_description = "Статус заказа"
 
-    # Количество зарезервированного товара
     def display_reserved_quantity(self, obj: OrderProductItem):
         return obj.quantity
     display_reserved_quantity.short_description = "Количество зарезервировано"
 
-    # Цена товара на момент заказа
     def display_reservation_price(self, obj: OrderProductItem):
         return f"{obj.price_at_order}"
     display_reservation_price.short_description = "Цена товара на момент заказа"
 
-    # Настройка полей для отображения
     list_display_fields = (
-        'display_reservation_order_link',      # Ссылка на заказ
-        'display_reservation_client_and_date', # Клиент и дата
-        'colored_reservation_status',          # Цветной статус
-        'display_reserved_quantity',           # Количество зарезервировано
-        'display_reservation_price',           # Цена на момент заказа
+        'display_reservation_order_link',
+        'display_reservation_client_and_date',
+        'colored_reservation_status',
+        'display_reserved_quantity',
+        'display_reservation_price',
     )
     
     fields = list_display_fields 
     readonly_fields = list_display_fields
 
-    # Показываем только товары из НЕ выданных и НЕ отмененных заказов (т.е. резервы)
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('order', 'order__client').exclude(
             Q(order__status=Order.STATUS_ISSUED) | Q(order__status=Order.STATUS_CANCELLED)
-        ).order_by('-order__created_at')  # Сортируем по дате создания заказа (новые сверху)
+        ).order_by('-order__created_at')
 
     def has_add_permission(self, request, obj=None): return False
     def has_change_permission(self, request, obj=None): return False
@@ -285,7 +274,6 @@ class ProductAdmin(admin.ModelAdmin):
     search_fields = ('name', 'sku') 
     autocomplete_fields = ('category',)
 
-    # readonly_fields формируем универсально
     readonly_fields_list = ['stock_quantity', 'cost_price']
     if hasattr(Product, 'created_at'): 
         readonly_fields_list.append('created_at')
@@ -296,7 +284,6 @@ class ProductAdmin(admin.ModelAdmin):
     inlines = [SupplyItemInlineForProduct, OrderProductItemReservationInlineForProduct, OrderProductItemInlineForProduct]
 
     def get_search_results(self, request, queryset, search_term):
-        # Только наш расширенный поиск, без стандартного Django
         if search_term:
             queryset = get_product_search_queryset(queryset, search_term, fields=['name', 'sku'])
             use_distinct = False
@@ -304,9 +291,16 @@ class ProductAdmin(admin.ModelAdmin):
             use_distinct = False
         return queryset, use_distinct
 
+    # Метод get_urls уже используется для 'reset-all-stock/'
     def get_urls(self):
         urls = super().get_urls()
+        # Добавляем кастомный URL для ценников
         custom_urls = [
+            path(
+                'pricetags/', 
+                self.admin_site.admin_view(self.pricetags_redirect_view), 
+                name='products_product_pricetags_redirect' # Уникальное имя URL
+            ),
             path(
                 'reset-all-stock/', 
                 self.admin_site.admin_view(self.reset_all_stock_view), 
@@ -314,6 +308,35 @@ class ProductAdmin(admin.ModelAdmin):
             )
         ]
         return custom_urls + urls
+
+    def pricetags_redirect_view(self, request):
+        """
+        Представление, которое перенаправляет на нашу страницу выбора ценников.
+        """
+        # Проверяем права пользователя, если нужно, иначе любой пользователь админки сможет перейти.
+        # Например, если хотим только для суперюзеров или конкретной группы:
+        if not request.user.is_staff: # or not request.user.has_perm('products.can_print_pricetags'):
+             raise PermissionDenied("У вас нет прав для доступа к печати ценников.")
+        
+        # Перенаправляем на нашу страницу выбора товаров для ценников
+        return redirect(reverse('products:pricetags:select_products'))
+
+    def changelist_view(self, request, extra_context=None):
+        """
+        Переопределяем changelist_view, чтобы добавить ссылку на страницу печати ценников.
+        """
+        # --- ВОТ ЗДЕСЬ ИСПРАВЛЕНИЕ ---
+        # Правильно получаем URL для нашей страницы выбора ценников
+        pricetags_selection_url = reverse('admin:products_product_pricetags_redirect')
+        
+        if extra_context is None:
+            extra_context = {}
+        # Передаем URL в extra_context, чтобы он был доступен в шаблоне как 'pricetags_selection_url'
+        extra_context['pricetags_selection_url'] = pricetags_selection_url
+
+        # В остальном вызываем оригинальный changelist_view
+        return super().changelist_view(request, extra_context=extra_context)
+
 
     def reset_all_stock_view(self, request):
         if not request.user.is_superuser: 

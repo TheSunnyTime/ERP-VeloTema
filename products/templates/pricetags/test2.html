@@ -1,0 +1,150 @@
+{# products/pricetags/templates/pricetags/pricetag_template.html #}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Ценники</title>
+    <style>
+        /* Базовые стили для PDF - WeasyPrint хорошо работает с CSS */
+        /* Размеры A4: 210mm x 297mm */
+        @page {
+            size: A4;
+            margin: 5mm; /* Отступы по краям листа А4 */
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            line-height: 1.2;
+            color: #000; /* ВСЕ СТРОКИ ЧЕРНЫЕ */
+        }
+
+        /*
+        Расчет размеров ценника для 3х7 на А4 (210мм x 297mm)
+        С учетом page margin: 5mm со всех сторон.
+        Доступная область: Ширина = 210 - 2*5 = 200mm. Высота = 297 - 2*5 = 287mm.
+        
+        Для 3х ценников по ширине:
+        Ширина ценника = (200mm / 3) - небольшой_отступ_между_ценниками = ~66.66mm.
+        Пусть ценник будет 65.5mm в ширину, чтобы оставить 1.16mm между ними.
+
+        Для 7х ценников по высоте:
+        Высота ценника = (287mm / 7) - небольшой_отступ_между_ценниками = ~41mm.
+        Пусть ценник будет 40mm в высоту, чтобы оставить 1mm между ними.
+        */
+        .pricetag-container {
+            width: 65.5mm;  /* Ширина ценника для 3 в ряд */
+            height: 40mm; /* Высота ценника для 7 в столбец */
+            float: left; /* Используем float для расположения рядом */
+            margin-right: 1.16mm; /* Отступ между ценниками по горизонтали */
+            margin-bottom: 1mm; /* Отступ между ценниками по вертикали */
+            box-sizing: border-box;
+            border: 0.5mm solid #000; /* Тонкая рамка для вырезания - ЧЕРНАЯ */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between; /* Распределяем контент по вертикали */
+            align-items: center; /* Центрируем по горизонтали */
+            padding: 1mm; /* Внутренние отступы ценника */
+            overflow: hidden; /* Обрезаем, если текст не помещается */
+            text-align: center; /* Выравнивание текста по центру по умолчанию */
+            position: relative; /* Для позиционирования даты и названия компании */
+        }
+
+        /* Убираем правый отступ для последнего ценника в ряду (каждый 3-й) */
+        .pricetag-container:nth-child(3n) { /* Каждый 3-й элемент */
+            margin-right: 0;
+        }
+
+        .pricetag-print-date {
+            font-size: 6pt; /* Мелкий шрифт */
+            position: absolute;
+            top: 1mm;
+            left: 1mm;
+            color: #555; /* Чуть светлее, чтобы не отвлекало */
+        }
+
+        .pricetag-company-name {
+            font-size: 7pt; /* Мелкий шрифт для названия компании */
+            position: absolute; /* Позиционируем абсолютно */
+            top: 1mm;
+            right: 1mm;
+            color: #000;
+        }
+
+        .pricetag-name {
+            font-size: 11pt; /* ЕЩЁ БОЛЬШЕ шрифт для названия товара */
+            font-weight: bold;
+            text-align: center;
+            line-height: 1.1;
+            margin-top: 7mm; /* УВЕЛИЧИЛ отступ сверху, чтобы опустить название */
+            margin-bottom: 3mm; /* Отступ от названия до линии цены */
+            max-height: 2.2em; /* Ограничиваем высоту для 2-3 строк */
+            overflow: hidden;
+            word-wrap: break-word; /* Перенос длинных слов */
+        }
+
+        /* .pricetag-name-line - УЖЕ УДАЛЕНА */
+
+        .pricetag-line-above-price {
+            border-top: 0.3mm solid #000; /* Линия над ценой - ЧЕРНАЯ, ОТ КРАЯ ДО КРАЯ */
+            width: 100%; /* От края до края */
+            margin-bottom: 1mm; /* Отступ от линии до цены */
+        }
+
+        .pricetag-price-block {
+            display: flex;
+            flex-direction: column; /* Цена и "за 1шт" друг под другом */
+            align-items: center; /* Центрируем */
+            justify-content: center;
+            margin-bottom: 1mm;
+        }
+
+        .pricetag-price {
+            font-size: 16pt; /* Меньше шрифт для цены */
+            font-weight: bold;
+            color: #000; /* ЦЕНА ЧЕРНАЯ */
+        }
+
+        .pricetag-unit {
+            font-size: 8pt; /* Размер шрифта для "за 1 шт." */
+            color: #000; /* Цвет ЧЕРНЫЙ */
+            margin-top: 0.5mm; /* Небольшой отступ от цены */
+        }
+
+        /* .pricetag-line-below-price - УДАЛЯЕМ */
+
+        .pricetag-footer {
+            font-size: 7pt;
+            color: #000; /* Цвет ЧЕРНЫЙ */
+            margin-top: auto; /* Прижимаем к низу ценника */
+            text-align: center;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    {% for product in products %}
+        <div class="pricetag-container">
+            <div class="pricetag-print-date">
+                {{ current_datetime|date:"d.m.Y H:i" }}
+            </div>
+            <div class="pricetag-company-name">ООО "РейвенПлюс"</div>
+            <div class="pricetag-name">{{ product.name }}</div>
+            {# <div class="pricetag-name-line"></div> - УДАЛЕНА #}
+            <div class="pricetag-line-above-price"></div> {# Оставляем ОДНУ линию над ценой #}
+            <div class="pricetag-price-block">
+                {% comment %} Разбиваем цену на рубли и копейки {% endcomment %}
+                {% with rubles=product.retail_price|floatformat:0 cents=product.retail_price|stringformat:"f"|slice:"-2:" %}
+                    <span class="pricetag-price">{{ rubles }}<span style="font-size: 10pt;"> руб.</span> {{ cents }}<span style="font-size: 10pt;"> коп.</span></span>
+                {% endwith %}
+                <span class="pricetag-unit">за 1 шт.</span>
+            </div>
+            {# <div class="pricetag-line-below-price"></div> - УДАЛЯЕМ ЛИНИЮ ПОД ЦЕНОЙ #}
+            <div class="pricetag-footer">
+                {# Здесь можно добавить, например, артикул или штрихкод, если нужно #}
+            </div>
+        </div>
+    {% endfor %}
+</body>
+</html>

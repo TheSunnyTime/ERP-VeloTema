@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django_extensions',
     'dal',
     'dal_select2',
+    'rest_framework', # <--- ДОБАВЬ ЭТУ СТРОКУ, ЕСЛИ ЕЕ НЕТ
 
     # Ваши кастомные приложения
     'products.apps.ProductsConfig',
@@ -72,7 +73,10 @@ TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         # Путь к общим шаблонам на уровне проекта (например, templates/admin/base_site.html)
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [
+            BASE_DIR / 'templates',
+            BASE_DIR / 'products' / 'templates', # <--- ДОБАВЬ ЭТУ СТРОКУ
+        ],
         'APP_DIRS': True, # Искать шаблоны также в папках templates внутри приложений
         'OPTIONS': {
             'context_processors': [
@@ -131,7 +135,7 @@ STATICFILES_DIRS = [
 # STATIC_ROOT - папка, куда будет собираться вся статика командой collectstatic
 # Обычно используется только для DEBUG = False.
 # Ее можно определить здесь или переопределить в local_settings.py для "рабочей" среды.
-# Пример: STATIC_ROOT = BASE_DIR / 'staticfiles_collected'
+STATIC_ROOT = BASE_DIR / 'staticfiles_collected'
 
 # MEDIA_URL и MEDIA_ROOT - для файлов, загружаемых пользователями (если они есть)
 # MEDIA_URL = '/media/'

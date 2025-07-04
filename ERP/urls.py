@@ -39,4 +39,6 @@ urlpatterns = [
     # Поставщики (включая нашу страницу импорта позиций поставки)
     # Предполагается, что в suppliers/urls.py определен app_name = 'suppliers'
     path('suppliers/', include('suppliers.urls')), 
+
+    
 ]
