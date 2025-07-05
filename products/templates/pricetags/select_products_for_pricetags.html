@@ -15,8 +15,6 @@
             box-shadow: 0 1px 2px rgba(0,0,0,0.05);
             margin-bottom: 20px;
             padding: 20px;
-            /* УДАЛЕНО: max-width */
-            /* УДАЛЕНО: margin-left, margin-right */
         }
         .search-form-row { 
             margin-bottom: 15px;
@@ -26,7 +24,6 @@
         }
         .search-form-row .select2-container {
             width: 100% !important; /* Делаем поле поиска максимально широким */
-            /* УДАЛЕНО: max-width */
         }
         .results-container {
             max-height: 500px;
@@ -35,7 +32,6 @@
             border-radius: 4px;
             margin-bottom: 15px;
             width: 100%; /* Таблица занимает всю ширину */
-            /* УДАЛЕНО: max-width */
         }
         #product-results-table {
             width: 100%;
@@ -65,7 +61,6 @@
             padding-top: 15px;
             border-top: 1px solid #eee;
             width: 100%; /* Строка выбранных товаров занимает всю ширину */
-            /* УДАЛЕНО: max-width */
             box-sizing: border-box;
         }
         .button.default {
@@ -83,6 +78,13 @@
         .button.default:disabled {
             background: #cccccc;
             cursor: not-allowed;
+        }
+
+        /* Стиль для поля количества */
+        .quantity-input {
+            width: 50px; /* Уменьшаем ширину */
+            padding: 5px;
+            text-align: center;
         }
     </style>
 {% endblock %}
@@ -109,60 +111,48 @@
 {# БЛОК BRANDING И NAV-GLOBAL не переопределяем, берем из base_site.html #}
 
 {% block content %}
-    {# Используем block.super, чтобы сохранить базовую структуру content, которая включает сайдбар #}
-    {{ block.super }} 
+    <div id="content-main">
+        <h1>Выбор товаров для печати ценников</h1>
+        <p>Используйте поиск, чтобы найти товары, и отметьте их галочками для печати.</p>
 
-    {# Этот div - это наша основная контентная область, куда мы помещаем наш UI #}
-    {# Мы НЕ создаем здесь content-main или content-related, так как они должны быть в родительском шаблоне #}
-    {# Вместо этого, мы ищем блок, который родительский шаблон использует для основного контента #}
-    {# Обычно это блок 'main' или 'content' #}
-    
-    {# Если block.super в content не сработает, то нужно будет определить наш контент в block main #}
-    {# block main находится внутри block content в admin/base.html #}
-    
-    {# Перемещаем наш UI в блок main, который должен быть внутри block content #}
-    {% block main %}
-        <div id="content-main"> {# Этот ID нужен для CSS админки #}
-            <h1>Выбор товаров для печати ценников</h1>
-            <p>Используйте поиск, чтобы найти товары, и отметьте их галочками для печати.</p>
+        <div class="module">
+            <h2>Поиск товаров</h2>
+            <div class="search-form-row">
+                {{ form.product }}
+                <div id="search-spinner" style="display: none;">Загрузка...</div>
+            </div>
 
-            <div class="module">
-                <h2>Поиск товаров</h2>
-                <div class="search-form-row">
-                    {{ form.product }}
-                    <div id="search-spinner" style="display: none;">Загрузка...</div>
-                </div>
+            <div class="results-container">
+                <table id="product-results-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 30px;"><input type="checkbox" id="select-all-products"></th>
+                            <th>Наименование</th>
+                            <th>Артикул</th>
+                            <th>Цена (BYN)</th>
+                            <th>Доступно</th>
+                            <th>Количество</th> {# НОВАЯ КОЛОНКА #}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr id="no-results-row" style="display: none;">
+                            <td colspan="6" style="text-align: center;">Ничего не найдено.</td> {# colspan увеличен #}
+                        </tr>
+                        {# Строки товаров добавляются сюда через JavaScript в addProductToTable #}
+                    </tbody>
+                </table>
+            </div>
 
-                <div class="results-container">
-                    <table id="product-results-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 30px;"><input type="checkbox" id="select-all-products"></th>
-                                <th>Наименование</th>
-                                <th>Артикул</th>
-                                <th>Цена (BYN)</th>
-                                <th>Доступно</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr id="no-results-row" style="display: none;">
-                                <td colspan="5" style="text-align: center;">Ничего не найдено.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="action-bar">
-                    <p>Выбрано товаров: <span id="selected-products-count">0</span></p>
-                    <button type="button" id="generate-pricetags-btn" class="button default">Сгенерировать ценники</button>
-                </div>
+            <div class="action-bar">
+                <p>Выбрано товаров: <span id="selected-products-count">0</span></p>
+                <button type="button" id="generate-pricetags-btn" class="button default">Сгенерировать ценники</button>
             </div>
         </div>
-    {% endblock %} {# Закрываем block main #}
+    </div>
 
     <script type="text/javascript">
         (function($) {
-            const selectedProductIds = new Set();
+            const selectedProductIds = new Map();
             const selectedProductsCountSpan = $('#selected-products-count');
             const generatePricetagsBtn = $('#generate-pricetags-btn');
             const productTableBody = $('#product-results-table tbody');
@@ -192,7 +182,7 @@
             function addProductToTable(product) {
                 const existingRow = productTableBody.find(`tr[data-product-id="${product.id}"]`);
                 if (existingRow.length > 0) {
-                    alert(`Товар "${product.name}" уже добавлен в список.`);
+                    alert(`Товар "${product.name}" уже добавлен в список. Если нужно больше ценников, измените количество.`);
                     return; 
                 }
                 
@@ -205,25 +195,45 @@
                 const retailPrice = parseFloat(product.retail_price || '0.00').toFixed(2);
                 const availableQuantity = product.available_stock_quantity || 0;
 
+                console.log('Попытка добавить товар в таблицу:', product);
                 const row = $(`<tr data-product-id="${product.id}">
                     <td><input type="checkbox" class="product-select-checkbox" value="${product.id}" checked></td>
                     <td>${product.name}</td>
                     <td>${product.sku || ''}</td>
                     <td>${retailPrice}</td>
                     <td>${availableQuantity}</td>
+                    <td><input type="number" class="quantity-input" value="1" min="1" data-product-id="${product.id}"></td> {# НОВОЕ ПОЛЕ КОЛИЧЕСТВА #}
                 </tr>`);
+                console.log('Сформированная строка:', row.html());
                 
                 row.find('.product-select-checkbox').on('change', function() {
+                    const productId = parseInt(this.value);
                     if (this.checked) {
-                        selectedProductIds.add(parseInt(this.value));
+                        const quantity = parseInt(row.find('.quantity-input').val()) || 1;
+                        selectedProductIds.set(productId, quantity);
+                        row.find('.quantity-input').prop('disabled', false);
                     } else {
-                        selectedProductIds.delete(parseInt(this.value));
+                        selectedProductIds.delete(productId);
                         selectAllCheckbox.prop('checked', false);
+                        row.find('.quantity-input').prop('disabled', true);
                     }
                     updateSelectedCount();
                 });
+
+                row.find('.quantity-input').on('change keyup', function() {
+                    const productId = parseInt($(this).data('product-id'));
+                    let quantity = parseInt($(this).val());
+                    if (isNaN(quantity) || quantity < 1) {
+                        quantity = 1;
+                        $(this).val(1);
+                    }
+                    if (selectedProductIds.has(productId)) {
+                        selectedProductIds.set(productId, quantity);
+                    }
+                });
+
                 productTableBody.append(row);
-                selectedProductIds.add(product.id);
+                selectedProductIds.set(product.id, 1);
                 updateSelectedCount();
                 noResultsRow.hide();
             }
@@ -258,10 +268,15 @@
                     const checkboxes = productTableBody.find('.product-select-checkbox');
                     checkboxes.prop('checked', this.checked);
                     checkboxes.each(function() {
+                        const productId = parseInt($(this).val());
+                        const quantityInput = $(this).closest('tr').find('.quantity-input');
                         if (this.checked) {
-                            selectedProductIds.add(parseInt(this.value));
+                            const quantity = parseInt(quantityInput.val()) || 1;
+                            selectedProductIds.set(productId, quantity);
+                            quantityInput.prop('disabled', false);
                         } else {
-                            selectedProductIds.delete(parseInt(this.value));
+                            selectedProductIds.delete(productId);
+                            quantityInput.prop('disabled', true);
                         }
                     });
                     updateSelectedCount();
@@ -273,7 +288,12 @@
                         return;
                     }
 
-                    console.log('Выбраны товары с ID:', Array.from(selectedProductIds));
+                    const productsToPrint = Array.from(selectedProductIds).map(([id, quantity]) => ({
+                        id: id,
+                        quantity: quantity
+                    }));
+
+                    console.log('Выбраны товары с ID и количеством:', productsToPrint);
 
                     const form = $('<form>', {
                         method: 'POST',
@@ -289,8 +309,8 @@
 
                     $('<input>', {
                         type: 'hidden',
-                        name: 'product_ids',
-                        value: JSON.stringify(Array.from(selectedProductIds))
+                        name: 'products_to_print',
+                        value: JSON.stringify(productsToPrint)
                     }).appendTo(form);
 
                     form.appendTo('body').submit();
