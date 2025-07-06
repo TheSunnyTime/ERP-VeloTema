@@ -5,6 +5,7 @@ from django.contrib.auth.models import User # Для кастомизации __
 from .order_type_admin import OrderTypeAdmin
 from .service_admin import ServiceAdmin
 from .order_admin import OrderAdmin
+from .service_admin_forms import * # <-- ДОБАВЬ ЭТУ СТРОКУ
 # Инлайны (OrderProductItemInline, OrderServiceItemInline) не нужно импортировать сюда,
 # так как они не регистрируются напрямую, а используются в OrderAdmin.
 
